@@ -21,6 +21,14 @@ require attention to details. If you ask questions in the Issues,
 I'll try to help if I can. For a nicer user interface, check out the
 [fork of this project](https://github.com/ilyabrilev/biosim4) hosted by @ilyabrilev.
 
+## Interactive web app
+
+The [`webapp/`](webapp/) directory contains a browser-based reimplementation of this
+simulator (TypeScript/React, no server required). It lets you tune the world and
+genetics from a control panel, watch every creature move live on a canvas, and
+switch the neural-net evaluation between a CPU and a WebGPU compute backend.
+See [`webapp/README.md`](webapp/README.md) for how to run it.
+
 Document Contents
 -----------------
 
