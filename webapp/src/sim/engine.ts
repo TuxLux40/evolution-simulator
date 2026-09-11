@@ -3,9 +3,18 @@
 // spawnNewGeneration.cpp, peeps.cpp, and endOfSimStep.cpp.
 
 import { Rng, makeSeed } from './random';
-import { randomDir8, coordAsDir, type Coord } from './geometry';
-import { Grid, Signals } from './grid';
-import { makeRandomGenome, generateChildGenome, createWiringFromGenome, genomeColorHash, type Genome } from './genome';
+import { fetchTrueRandomSeed } from './trueRandom';
+import { randomDir8, coordAsDir, coordLength, coordSub, type Coord } from './geometry';
+import { Grid, Signals, type TerrainCell } from './grid';
+import {
+  makeRandomGenome,
+  generateChildGenome,
+  createWiringFromGenome,
+  genomeColorHash,
+  type Genome,
+  type Gene,
+  type ParentCandidate,
+} from './genome';
 import { executeActions } from './actions';
 import { passedSurvivalCriterion, passedAltruismSacrifice, applyPerStepChallenge } from './challenges';
 import { Challenge, type SimParams } from './params';
@@ -15,6 +24,7 @@ import type { FeedForwardBackend } from './backend';
 import { CpuFeedForwardBackend } from './backend';
 
 export interface RenderIndiv {
+  uid: number;
   x: number;
   y: number;
   colorHash: number;
@@ -26,13 +36,45 @@ export interface EngineSnapshot {
   generation: number;
   simStep: number;
   stepsPerGeneration: number;
+  maxGenerations: number;
   aliveCount: number;
   lastSurvivorCount: number;
   survivorHistory: number[];
   barrierLocations: Coord[];
+  terrainLocations: TerrainCell[];
   individuals: RenderIndiv[];
   signalMagnitudeAt: (x: number, y: number) => number;
+  isFinished: boolean;
 }
+
+export interface IndividualDetail {
+  uid: number;
+  index: number;
+  alive: boolean;
+  loc: Coord;
+  birthLoc: Coord;
+  migrationDistance: number;
+  age: number;
+  generation: number;
+  genomeLength: number;
+  responsiveness: number;
+  oscPeriod: number;
+  longProbeDist: number;
+  colorHash: number;
+  parentUids: [number, number] | null;
+  neurons: Array<{ output: number; driven: boolean }>;
+  connections: Gene[];
+}
+
+export interface LineageRecord {
+  uid: number;
+  generation: number;
+  parentUids: [number, number] | null;
+  genomeLength: number;
+  colorHash: number;
+}
+
+const LINEAGE_LOG_CAP = 20000;
 
 export class SimulationEngine {
   params: SimParams;
@@ -40,6 +82,7 @@ export class SimulationEngine {
   private signals: Signals;
   private individuals: Indiv[];
   private rng: Rng;
+  private killRng: Rng;
   private generation = 0;
   private simStep = 0;
   private survivorHistory: number[] = [];
@@ -47,12 +90,18 @@ export class SimulationEngine {
   private backend: FeedForwardBackend;
   private world: SimWorld;
 
+  private nextUid = 1;
+  private uidToIndex = new Map<number, number>();
+  private lineageLog = new Map<number, LineageRecord>();
+  private lineageOrder: number[] = []; // uids in insertion order, for FIFO eviction
+
   constructor(params: SimParams, backend: FeedForwardBackend = new CpuFeedForwardBackend()) {
     this.params = { ...params };
     this.grid = new Grid(params.sizeX, params.sizeY);
     this.signals = new Signals(params.sizeX, params.sizeY);
     this.individuals = new Array(params.population + 1);
     this.rng = new Rng(params.deterministic ? params.rngSeed : makeSeed());
+    this.killRng = new Rng(makeSeed());
     this.backend = backend;
     this.world = {
       grid: this.grid,
@@ -60,11 +109,23 @@ export class SimulationEngine {
       individuals: this.individuals,
       params: this.params,
       rng: this.rng,
+      killRng: this.killRng,
       simStep: 0,
       deathQueue: [],
       moveQueue: [],
     };
     this.initializeGeneration0();
+  }
+
+  /** Reseeds the kill-decision RNG stream from a real drand beacon fetch. Fire-and-forget; falls back silently to its current seed if the fetch fails. */
+  async reseedKillRngFromDrand(): Promise<void> {
+    try {
+      const seed = await fetchTrueRandomSeed();
+      this.killRng = new Rng(seed);
+      this.world.killRng = this.killRng;
+    } catch (err) {
+      console.warn('Could not fetch a true-random seed for kill decisions; keeping the previous stream.', err);
+    }
   }
 
   async setBackend(backend: FeedForwardBackend): Promise<void> {
@@ -77,10 +138,14 @@ export class SimulationEngine {
     old.dispose();
   }
 
-  private spawnIndividual(index: number, loc: Coord, genome: Genome): Indiv {
+  private spawnIndividual(index: number, loc: Coord, genome: Genome, parentUids: [number, number] | null): Indiv {
+    const uid = this.nextUid++;
     const indiv: Indiv = {
       alive: true,
       index,
+      uid,
+      generation: this.generation,
+      parentUids,
       loc,
       birthLoc: { ...loc },
       age: 0,
@@ -93,33 +158,54 @@ export class SimulationEngine {
       challengeBits: 0,
     };
     this.grid.set(loc, index);
+    this.uidToIndex.set(uid, index);
+
+    this.lineageLog.set(uid, {
+      uid,
+      generation: this.generation,
+      parentUids,
+      genomeLength: genome.length,
+      colorHash: genomeColorHash(genome),
+    });
+    this.lineageOrder.push(uid);
+    if (this.lineageOrder.length > LINEAGE_LOG_CAP) {
+      const evicted = this.lineageOrder.shift()!;
+      this.lineageLog.delete(evicted);
+    }
+
     return indiv;
   }
 
   private initializeGeneration0(): void {
+    this.generation = 0;
     this.grid.zeroFill();
     this.grid.createBarrier(this.params.barrierType, this.rng);
+    this.grid.createTerrain(this.params.terrainType, this.rng);
     this.signals.zeroFill();
+    this.uidToIndex.clear();
     for (let index = 1; index <= this.params.population; index++) {
       const genome = makeRandomGenome(this.rng, this.params.genomeInitialLength);
       const loc = this.grid.findEmptyLocation(this.rng);
-      this.individuals[index] = this.spawnIndividual(index, loc, genome);
+      this.individuals[index] = this.spawnIndividual(index, loc, genome, null);
     }
-    this.generation = 0;
     this.simStep = 0;
     void this.backend.prepareGeneration(this.world);
+    if (this.params.killEnable && this.params.killUsesTrueRng) void this.reseedKillRngFromDrand();
   }
 
-  private initializeNewGeneration(parentGenomes: Genome[]): void {
+  private initializeNewGeneration(parents: ParentCandidate[]): void {
     this.grid.zeroFill();
     this.grid.createBarrier(this.params.barrierType, this.rng);
+    this.grid.createTerrain(this.params.terrainType, this.rng);
     this.signals.zeroFill();
+    this.uidToIndex.clear();
     for (let index = 1; index <= this.params.population; index++) {
-      const genome = generateChildGenome(parentGenomes, this.params, this.rng);
+      const { genome, parentUids } = generateChildGenome(parents, this.params, this.rng);
       const loc = this.grid.findEmptyLocation(this.rng);
-      this.individuals[index] = this.spawnIndividual(index, loc, genome);
+      this.individuals[index] = this.spawnIndividual(index, loc, genome, parentUids);
     }
     this.simStep = 0;
+    if (this.params.killEnable && this.params.killUsesTrueRng) void this.reseedKillRngFromDrand();
   }
 
   /** Restarts the whole run with fresh random genomes, keeping current params. */
@@ -129,6 +215,7 @@ export class SimulationEngine {
     this.signals = new Signals(this.params.sizeX, this.params.sizeY);
     this.individuals = new Array(this.params.population + 1);
     this.rng = new Rng(this.params.deterministic ? this.params.rngSeed : makeSeed());
+    this.killRng = new Rng(makeSeed());
     this.survivorHistory = [];
     this.lastSurvivorCount = 0;
     this.world.grid = this.grid;
@@ -136,8 +223,13 @@ export class SimulationEngine {
     this.world.individuals = this.individuals;
     this.world.params = this.params;
     this.world.rng = this.rng;
+    this.world.killRng = this.killRng;
     this.world.deathQueue = [];
     this.world.moveQueue = [];
+    this.nextUid = 1;
+    this.uidToIndex.clear();
+    this.lineageLog.clear();
+    this.lineageOrder = [];
     this.initializeGeneration0();
   }
 
@@ -171,22 +263,31 @@ export class SimulationEngine {
     }
 
     parents.sort((a, b) => b.score - a.score); // descending: best score first, matching upstream's parent-bias indexing
-    const parentGenomes = parents.map((p) => individuals[p.index].genome);
+    const parentCandidates: ParentCandidate[] = parents.map((p) => ({
+      uid: individuals[p.index].uid,
+      genome: individuals[p.index].genome,
+    }));
 
-    this.lastSurvivorCount = parentGenomes.length;
-    this.survivorHistory.push(parentGenomes.length);
+    this.lastSurvivorCount = parentCandidates.length;
+    this.survivorHistory.push(parentCandidates.length);
     if (this.survivorHistory.length > 500) this.survivorHistory.shift();
 
-    if (parentGenomes.length > 0) {
-      this.initializeNewGeneration(parentGenomes);
+    if (parentCandidates.length > 0) {
       this.generation++;
+      this.initializeNewGeneration(parentCandidates);
     } else {
       this.initializeGeneration0();
     }
     void this.backend.prepareGeneration(this.world);
   }
 
+  /** True once the configured generation limit (if any) has been reached. */
+  isFinished(): boolean {
+    return this.params.maxGenerations > 0 && this.generation >= this.params.maxGenerations;
+  }
+
   async stepOnce(): Promise<void> {
+    if (this.isFinished()) return;
     const { params, individuals } = this.world;
     this.world.simStep = this.simStep;
 
@@ -238,6 +339,17 @@ export class SimulationEngine {
     }
   }
 
+  /** uids of currently-alive creatures that would pass the active challenge right now (a live preview, not a commitment -- positions keep changing). */
+  getSurvivorPreview(): Set<number> {
+    const uids = new Set<number>();
+    const challenge = this.params.challenge === Challenge.ALTRUISM ? Challenge.ALTRUISM : this.params.challenge;
+    for (let index = 1; index <= this.params.population; index++) {
+      const indiv = this.individuals[index];
+      if (indiv?.alive && passedSurvivalCriterion(this.world, indiv, challenge).passed) uids.add(indiv.uid);
+    }
+    return uids;
+  }
+
   getSnapshot(): EngineSnapshot {
     const individuals: RenderIndiv[] = [];
     let aliveCount = 0;
@@ -245,7 +357,7 @@ export class SimulationEngine {
       const indiv = this.individuals[index];
       if (indiv && indiv.alive) {
         aliveCount++;
-        individuals.push({ x: indiv.loc.x, y: indiv.loc.y, colorHash: genomeColorHash(indiv.genome) });
+        individuals.push({ uid: indiv.uid, x: indiv.loc.x, y: indiv.loc.y, colorHash: genomeColorHash(indiv.genome) });
       }
     }
     return {
@@ -254,12 +366,56 @@ export class SimulationEngine {
       generation: this.generation,
       simStep: this.simStep,
       stepsPerGeneration: this.params.stepsPerGeneration,
+      maxGenerations: this.params.maxGenerations,
       aliveCount,
       lastSurvivorCount: this.lastSurvivorCount,
       survivorHistory: this.survivorHistory,
       barrierLocations: this.grid.barrierLocations,
+      terrainLocations: this.grid.terrainLocations,
       individuals,
       signalMagnitudeAt: (x: number, y: number) => this.signals.getMagnitude({ x, y }),
+      isFinished: this.isFinished(),
     };
+  }
+
+  /** Full detail for one creature (for the selection/inspector panel), by its stable uid. */
+  getIndividualDetail(uid: number): IndividualDetail | null {
+    const index = this.uidToIndex.get(uid);
+    if (index === undefined) return null;
+    const indiv = this.individuals[index];
+    if (!indiv || indiv.uid !== uid) return null;
+
+    return {
+      uid: indiv.uid,
+      index: indiv.index,
+      alive: indiv.alive,
+      loc: indiv.loc,
+      birthLoc: indiv.birthLoc,
+      migrationDistance: coordLength(coordSub(indiv.loc, indiv.birthLoc)),
+      age: indiv.age,
+      generation: indiv.generation,
+      genomeLength: indiv.genome.length,
+      responsiveness: indiv.responsiveness,
+      oscPeriod: indiv.oscPeriod,
+      longProbeDist: indiv.longProbeDist,
+      colorHash: genomeColorHash(indiv.genome),
+      parentUids: indiv.parentUids,
+      neurons: indiv.nnet.neurons.map((n) => ({ ...n })),
+      connections: indiv.nnet.connections.map((c) => ({ ...c })),
+    };
+  }
+
+  /** Walks the (memory-bounded) lineage log backward from `uid`, oldest ancestor last. */
+  getLineage(uid: number, maxDepth = 8): LineageRecord[] {
+    const chain: LineageRecord[] = [];
+    let current = this.lineageLog.get(uid);
+    const seen = new Set<number>();
+    while (current && chain.length < maxDepth && !seen.has(current.uid)) {
+      chain.push(current);
+      seen.add(current.uid);
+      const nextUid = current.parentUids ? current.parentUids[0] : undefined;
+      current = nextUid !== undefined ? this.lineageLog.get(nextUid) : undefined;
+    }
+    return chain;
   }
 }

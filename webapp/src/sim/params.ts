@@ -69,6 +69,29 @@ export const BARRIER_LABELS: Record<BarrierType, string> = {
   [BarrierType.SPOTS]: 'Sequence of spots',
 };
 
+// A second, independent layer alongside barriers: patches of terrain with a
+// temperature that speeds up or slows down movement instead of blocking it
+// outright (stand-in for snow/mud/elevation -- cold is slow, hot is fast;
+// literal 3D terrain isn't worth the rendering rewrite for what it'd add here).
+export const TerrainType = {
+  NONE: 0,
+  GRADIENT: 1,
+  COLD_PATCH_CENTER: 2,
+  HOT_PATCH_CENTER: 3,
+  ALTERNATING_BANDS: 4,
+  RANDOM_SPOTS: 5,
+} as const;
+export type TerrainType = (typeof TerrainType)[keyof typeof TerrainType];
+
+export const TERRAIN_LABELS: Record<TerrainType, string> = {
+  [TerrainType.NONE]: 'None',
+  [TerrainType.GRADIENT]: 'Temperature gradient (cold→hot)',
+  [TerrainType.COLD_PATCH_CENTER]: 'Cold patch (center, slow)',
+  [TerrainType.HOT_PATCH_CENTER]: 'Hot patch (center, fast)',
+  [TerrainType.ALTERNATING_BANDS]: 'Alternating cold/hot bands',
+  [TerrainType.RANDOM_SPOTS]: 'Random hot/cold spots',
+};
+
 export type ComputeBackend = 'cpu' | 'gpu';
 
 export interface SimParams {
@@ -76,6 +99,7 @@ export interface SimParams {
   sizeY: number;
   population: number;
   stepsPerGeneration: number;
+  maxGenerations: number; // 0 = unlimited; run auto-pauses once reached
   genomeInitialLength: number;
   genomeMaxLength: number;
   maxNumberNeurons: number;
@@ -84,6 +108,7 @@ export interface SimParams {
   sexualReproduction: boolean;
   chooseParentsByFitness: boolean;
   killEnable: boolean;
+  killUsesTrueRng: boolean; // kill decisions draw from a stream reseeded from drand instead of the run's PRNG
   populationSensorRadius: number;
   signalSensorRadius: number;
   longProbeDistance: number;
@@ -91,6 +116,7 @@ export interface SimParams {
   responsivenessCurveKFactor: number;
   challenge: Challenge;
   barrierType: BarrierType;
+  terrainType: TerrainType;
   deterministic: boolean;
   rngSeed: number;
   computeBackend: ComputeBackend;
@@ -102,6 +128,7 @@ export const DEFAULT_PARAMS: SimParams = {
   sizeY: 128,
   population: 1200,
   stepsPerGeneration: 300,
+  maxGenerations: 0,
   genomeInitialLength: 24,
   genomeMaxLength: 300,
   maxNumberNeurons: 5,
@@ -110,6 +137,7 @@ export const DEFAULT_PARAMS: SimParams = {
   sexualReproduction: true,
   chooseParentsByFitness: true,
   killEnable: false,
+  killUsesTrueRng: false,
   populationSensorRadius: 2.5,
   signalSensorRadius: 2.0,
   longProbeDistance: 16,
@@ -117,6 +145,7 @@ export const DEFAULT_PARAMS: SimParams = {
   responsivenessCurveKFactor: 2,
   challenge: Challenge.CORNER_WEIGHTED,
   barrierType: BarrierType.NONE,
+  terrainType: TerrainType.NONE,
   deterministic: false,
   rngSeed: 12345678,
   computeBackend: 'cpu',

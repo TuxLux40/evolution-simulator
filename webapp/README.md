@@ -19,10 +19,33 @@ npm run build    # type-checks and produces a static dist/ you can host anywhere
 
 - A control panel to tune the world live: population, world size, mutation
   rate, sexual/asexual reproduction, selection challenge (14+ of the
-  original's survival criteria), barrier layouts, sensor radii, and more.
+  original's survival criteria), barrier layouts, sensor radii, a manual
+  generation cap, and more. Every slider has a paired numeric input box.
 - A live canvas showing every creature moving every simulation step, colored
-  by a hash of its genome, plus an optional pheromone-trail overlay.
-- A generation/survivor history chart.
+  by a hash of its genome, with an optional pheromone-trail overlay and a
+  "preview who'd survive right now" highlight for the active challenge.
+  Click any creature to select it; drag-free camera **follow** keeps it
+  centered as it moves.
+- A **creature inspector**: status, age, location, migration distance,
+  genome/neuron/connection counts, a lineage chain (parents and ancestors,
+  clickable to jump between them), and a live SVG diagram of its neural net
+  (sensors → neurons → actions, edges colored/weighted by connection sign
+  and strength) — exportable as its own SVG file.
+- **Terrain**: patches of cold (slow) or hot (fast) ground layered
+  independently of barriers — a gradient, bands, patches, or random spots —
+  which creatures can also sense directly. A stand-in for snow/mud/elevation
+  without the cost of full 3D terrain.
+- A generation/survivor history chart, and export buttons for a PNG
+  snapshot, the current config as JSON, survivor-history as CSV, and a
+  WebM video recording (via the browser's own `MediaRecorder`, no extra
+  library).
+- A **true-randomness** option for kill decisions: when killing is enabled,
+  toggling this reseeds a dedicated RNG stream each generation from
+  [drand](https://drand.love), the public randomness beacon Cloudflare
+  hosts (fed in part by their "lava lamp wall" entropy source, which has no
+  public API of its own) — real entropy for the one place in the sim where
+  it's actually meaningful (life-or-death), without a network call per
+  decision.
 - A choice of compute backend for the neural-net evaluation step:
   - **CPU** — walks each creature's neural net in plain JS. Simple, and
     fastest for small-to-medium populations.
@@ -41,10 +64,24 @@ npm run build    # type-checks and produces a static dist/ you can host anywhere
 
 - `src/sim/` — the simulation engine, ported from the original C++ (grid,
   signals/pheromones, genome, neural-net wiring, sensors, actions, survival
-  challenges, barriers) plus the pluggable CPU/GPU feed-forward backends.
-- `src/render/` — the canvas renderer and the color-from-genome mapping.
-- `src/ui/` — the control panel, stats panel, and history chart.
+  challenges, barriers, terrain) plus the pluggable CPU/GPU feed-forward
+  backends, lineage/uid tracking, and the drand true-randomness client.
+- `src/render/` — the canvas renderer, the color-from-genome mapping, and
+  the brain (neural net) SVG diagram.
+- `src/ui/` — the control panel, stats panel, creature inspector, history
+  chart, and the shared slider+numeric-input field.
+- `src/export/` — PNG/JSON/CSV/SVG downloads and WebM video recording.
 - `src/App.tsx` — wires the engine to the UI and owns top-level state.
+
+## Not built (yet)
+
+A few ideas that came up but aren't in yet: free mouse pan/zoom (there's
+click-to-select and follow-a-creature, but no drag/scroll camera), a neuron
+editor (the brain diagram is read-only), save/load of a running simulation's
+full state, and GIF export (WebM video covers the same need with zero extra
+dependencies). [ilyabrilev's SFML fork](https://github.com/ilyabrilev/biosim4)
+of the original C++ project has some of these and is worth a look for
+reference.
 
 ## Deliberate differences from upstream biosim4
 

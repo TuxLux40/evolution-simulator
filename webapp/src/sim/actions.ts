@@ -50,13 +50,16 @@ export function executeActions(world: SimWorld, indiv: Indiv, actionLevels: Floa
     }
   }
 
-  // Kill forward -- runtime-gated by params.killEnable (see sensorsActions.ts note)
+  // Kill forward -- runtime-gated by params.killEnable (see sensorsActions.ts note).
+  // When killUsesTrueRng is on, the life-or-death coin flip draws from a stream
+  // reseeded periodically from a real drand beacon instead of the run's PRNG.
   if (world.params.killEnable) {
     const killThreshold = 0.5;
     let level = actionLevels[Action.KILL_FORWARD];
     level = (Math.tanh(level) + 1.0) / 2.0;
     level *= responsivenessAdjusted;
-    if (level > killThreshold && prob2bool(world, level)) {
+    const killRoll = world.params.killUsesTrueRng ? world.killRng.nextFloat() < level : prob2bool(world, level);
+    if (level > killThreshold && killRoll) {
       const otherLoc = coordAdd(indiv.loc, dirToNormalizedCoord(indiv.lastMoveDir));
       if (world.grid.isInBounds(otherLoc) && world.grid.isOccupiedAt(otherLoc)) {
         const otherIndex = world.grid.at(otherLoc);
@@ -110,8 +113,11 @@ export function executeActions(world: SimWorld, indiv: Indiv, actionLevels: Floa
     moveY += offset.y * level;
   }
 
-  moveX = Math.tanh(moveX) * responsivenessAdjusted;
-  moveY = Math.tanh(moveY) * responsivenessAdjusted;
+  // Slow terrain (see grid.ts createTerrain) dampens movement probability at
+  // the creature's current cell, without biasing direction.
+  const terrainSpeed = world.grid.speedAt(indiv.loc);
+  moveX = Math.tanh(moveX) * responsivenessAdjusted * terrainSpeed;
+  moveY = Math.tanh(moveY) * responsivenessAdjusted * terrainSpeed;
 
   const probX = prob2bool(world, Math.abs(moveX)) ? 1 : 0;
   const probY = prob2bool(world, Math.abs(moveY)) ? 1 : 0;

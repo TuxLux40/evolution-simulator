@@ -153,6 +153,22 @@ button.secondary {
   gap: 8px;
 }
 
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slider-row input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.slider-number {
+  width: 72px;
+  flex: 0 0 auto;
+}
+
 .field-group {
   border: 1px solid #1f2937;
   border-radius: 8px;
@@ -183,6 +199,10 @@ button.secondary {
   margin: 6px 0 0;
 }
 
+.hint.error {
+  color: #f87171;
+}
+
 .stat-row {
   display: flex;
   justify-content: space-between;
@@ -208,4 +228,87 @@ button.secondary {
   display: block;
   background: #111827;
   border-radius: 6px;
+}
+
+.inspector-panel {
+  border-left: 1px solid #1f2937;
+}
+
+.inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-header h2 {
+  margin: 0 0 12px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 15px;
+  color: inherit;
+}
+
+.inspector-header button {
+  padding: 2px 8px;
+  margin-bottom: 12px;
+}
+
+.lineage-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lineage-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lineage-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: #38bdf8;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.brain-diagram {
+  background: #111827;
+  border-radius: 6px;
+  margin-top: 6px;
+}
+
+.world-canvas-container canvas {
+  cursor: pointer;
+}
+
+.run-complete-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 5;
 }

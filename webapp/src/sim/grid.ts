@@ -2,23 +2,37 @@
 
 import type { Coord } from './geometry';
 import { Rng } from './random';
-import { BarrierType } from './params';
+import { BarrierType, TerrainType } from './params';
 
 export const EMPTY = 0;
 export const BARRIER = 0xffff;
 export const SIGNAL_MAX = 255;
 
+// Terrain speed is a movement-probability multiplier: 1.0 is neutral,
+// <1.0 is cold/slow (snow, mud), >1.0 is hot/fast. Sensors normalize against
+// this range (see sensors.ts TERRAIN_SPEED).
+export const TERRAIN_SPEED_COLD = 0.35;
+export const TERRAIN_SPEED_NEUTRAL = 1.0;
+export const TERRAIN_SPEED_HOT = 1.75;
+
+export interface TerrainCell extends Coord {
+  speed: number;
+}
+
 export class Grid {
   sizeX: number;
   sizeY: number;
   private data: Uint16Array;
+  private terrainSpeed: Float32Array;
   barrierLocations: Coord[] = [];
   barrierCenters: Coord[] = [];
+  terrainLocations: TerrainCell[] = [];
 
   constructor(sizeX: number, sizeY: number) {
     this.sizeX = sizeX;
     this.sizeY = sizeY;
     this.data = new Uint16Array(sizeX * sizeY);
+    this.terrainSpeed = new Float32Array(sizeX * sizeY).fill(TERRAIN_SPEED_NEUTRAL);
   }
 
   private idx(x: number, y: number): number {
@@ -27,6 +41,12 @@ export class Grid {
 
   zeroFill(): void {
     this.data.fill(0);
+    this.terrainSpeed.fill(TERRAIN_SPEED_NEUTRAL);
+    this.terrainLocations = [];
+  }
+
+  speedAt(loc: Coord): number {
+    return this.terrainSpeed[this.idx(loc.x, loc.y)];
   }
 
   isInBounds(loc: Coord): boolean {
@@ -163,6 +183,74 @@ export class Grid {
             this.barrierLocations.push(l);
           });
           this.barrierCenters.push(loc);
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * Paints a temperature-flavored terrain layer: cold patches slow movement,
+   * hot patches speed it up (a stand-in for snow/mud/elevation). Never
+   * blocks movement outright the way barriers do.
+   */
+  createTerrain(terrainType: TerrainType, rng: Rng): void {
+    this.terrainSpeed.fill(TERRAIN_SPEED_NEUTRAL);
+    this.terrainLocations = [];
+
+    const paint = (loc: Coord, speed: number) => {
+      this.terrainSpeed[this.idx(loc.x, loc.y)] = speed;
+      this.terrainLocations.push({ ...loc, speed });
+    };
+    const paintBox = (minX: number, minY: number, maxX: number, maxY: number, speed: number) => {
+      for (let x = minX; x <= maxX; x++) for (let y = minY; y <= maxY; y++) paint({ x, y }, speed);
+    };
+
+    const { sizeX, sizeY } = this;
+
+    switch (terrainType) {
+      case TerrainType.NONE:
+        return;
+
+      case TerrainType.GRADIENT: {
+        // Smooth west(cold)-to-east(hot) gradient, like a temperature map.
+        for (let x = 0; x < sizeX; x++) {
+          const speed = TERRAIN_SPEED_COLD + ((TERRAIN_SPEED_HOT - TERRAIN_SPEED_COLD) * x) / Math.max(1, sizeX - 1);
+          for (let y = 0; y < sizeY; y++) paint({ x, y }, speed);
+        }
+        break;
+      }
+
+      case TerrainType.COLD_PATCH_CENTER: {
+        const radius = Math.min(sizeX, sizeY) / 4;
+        const center = { x: Math.floor(sizeX / 2), y: Math.floor(sizeY / 2) };
+        visitNeighborhood(center, radius, sizeX, sizeY, (loc) => paint(loc, TERRAIN_SPEED_COLD));
+        break;
+      }
+
+      case TerrainType.HOT_PATCH_CENTER: {
+        const radius = Math.min(sizeX, sizeY) / 4;
+        const center = { x: Math.floor(sizeX / 2), y: Math.floor(sizeY / 2) };
+        visitNeighborhood(center, radius, sizeX, sizeY, (loc) => paint(loc, TERRAIN_SPEED_HOT));
+        break;
+      }
+
+      case TerrainType.ALTERNATING_BANDS: {
+        const bandHeight = Math.max(1, Math.floor(sizeY / 8));
+        for (let band = 0; band < 8; band++) {
+          const speed = band % 2 === 0 ? TERRAIN_SPEED_COLD : TERRAIN_SPEED_HOT;
+          paintBox(0, band * bandHeight, sizeX - 1, Math.min(sizeY - 1, band * bandHeight + bandHeight - 1), speed);
+        }
+        break;
+      }
+
+      case TerrainType.RANDOM_SPOTS: {
+        const numberOfSpots = 8;
+        const radius = Math.min(sizeX, sizeY) / 10;
+        for (let n = 0; n < numberOfSpots; n++) {
+          const center = { x: rng.nextInt(0, sizeX - 1), y: rng.nextInt(0, sizeY - 1) };
+          const speed = rng.chance(0.5) ? TERRAIN_SPEED_COLD : TERRAIN_SPEED_HOT;
+          visitNeighborhood(center, radius, sizeX, sizeY, (loc) => paint(loc, speed));
         }
         break;
       }

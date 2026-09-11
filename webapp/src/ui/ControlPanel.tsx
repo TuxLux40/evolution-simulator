@@ -1,6 +1,16 @@
-import { useState } from 'react';
-import { type SimParams, type ComputeBackend, Challenge, CHALLENGE_LABELS, BarrierType, BARRIER_LABELS } from '../sim/params';
+import { useEffect, useState } from 'react';
+import {
+  type SimParams,
+  type ComputeBackend,
+  Challenge,
+  CHALLENGE_LABELS,
+  BarrierType,
+  BARRIER_LABELS,
+  TerrainType,
+  TERRAIN_LABELS,
+} from '../sim/params';
 import { GPU_MAX_NEURONS } from '../sim/gpuFeedForward';
+import { SliderField } from './SliderField';
 
 export type GpuStatus = 'checking' | 'available' | 'unavailable';
 
@@ -8,6 +18,7 @@ interface ControlPanelProps {
   params: SimParams;
   onLiveChange: (patch: Partial<SimParams>) => void;
   onApplyStructural: (patch: Partial<SimParams>) => void;
+  onFetchTrueRandomSeed: () => Promise<void>;
   gpuStatus: GpuStatus;
   onBackendChange: (backend: ComputeBackend) => void;
   running: boolean;
@@ -16,6 +27,13 @@ interface ControlPanelProps {
   onResetRun: () => void;
   showPheromones: boolean;
   onTogglePheromones: (v: boolean) => void;
+  showSurvivorPreview: boolean;
+  onToggleSurvivorPreview: (v: boolean) => void;
+  onExportConfig: () => void;
+  onExportStats: () => void;
+  onExportSnapshot: () => void;
+  isRecording: boolean;
+  onToggleRecording: () => void;
 }
 
 const STRUCTURAL_KEYS = [
@@ -32,8 +50,27 @@ const STRUCTURAL_KEYS = [
 type StructuralPatch = Pick<SimParams, (typeof STRUCTURAL_KEYS)[number]>;
 
 export function ControlPanel(props: ControlPanelProps) {
-  const { params, onLiveChange, onApplyStructural, gpuStatus, onBackendChange, running, onPlayPause, onStep, onResetRun, showPheromones, onTogglePheromones } =
-    props;
+  const {
+    params,
+    onLiveChange,
+    onApplyStructural,
+    onFetchTrueRandomSeed,
+    gpuStatus,
+    onBackendChange,
+    running,
+    onPlayPause,
+    onStep,
+    onResetRun,
+    showPheromones,
+    onTogglePheromones,
+    showSurvivorPreview,
+    onToggleSurvivorPreview,
+    onExportConfig,
+    onExportStats,
+    onExportSnapshot,
+    isRecording,
+    onToggleRecording,
+  } = props;
 
   const [pending, setPending] = useState<StructuralPatch>({
     sizeX: params.sizeX,
@@ -45,8 +82,44 @@ export function ControlPanel(props: ControlPanelProps) {
     deterministic: params.deterministic,
     rngSeed: params.rngSeed,
   });
+  const [rngFetchStatus, setRngFetchStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  // Structural params only ever change via an apply (this panel's own, or the
+  // true-random-seed button) -- resync the form to reflect what actually committed.
+  useEffect(() => {
+    setPending({
+      sizeX: params.sizeX,
+      sizeY: params.sizeY,
+      population: params.population,
+      genomeInitialLength: params.genomeInitialLength,
+      genomeMaxLength: params.genomeMaxLength,
+      maxNumberNeurons: params.maxNumberNeurons,
+      deterministic: params.deterministic,
+      rngSeed: params.rngSeed,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    params.sizeX,
+    params.sizeY,
+    params.population,
+    params.genomeInitialLength,
+    params.genomeMaxLength,
+    params.maxNumberNeurons,
+    params.deterministic,
+    params.rngSeed,
+  ]);
 
   const structuralDirty = STRUCTURAL_KEYS.some((k) => pending[k] !== params[k]);
+
+  const handleFetchTrueRandomSeed = async () => {
+    setRngFetchStatus('loading');
+    try {
+      await onFetchTrueRandomSeed();
+      setRngFetchStatus('idle');
+    } catch {
+      setRngFetchStatus('error');
+    }
+  };
 
   return (
     <div className="panel control-panel">
@@ -62,15 +135,23 @@ export function ControlPanel(props: ControlPanelProps) {
         </button>
       </div>
 
+      <SliderField
+        label="Simulation speed"
+        value={params.stepsPerFrame}
+        min={1}
+        max={20}
+        step={1}
+        formatValue={(v) => `${v} step${v > 1 ? 's' : ''}/frame`}
+        onChange={(v) => onLiveChange({ stepsPerFrame: v })}
+      />
+
       <label className="field">
-        <span>Simulation speed ({params.stepsPerFrame} step{params.stepsPerFrame > 1 ? 's' : ''}/frame)</span>
+        <span>Max generations (0 = unlimited)</span>
         <input
-          type="range"
-          min={1}
-          max={20}
-          step={1}
-          value={params.stepsPerFrame}
-          onChange={(e) => onLiveChange({ stepsPerFrame: Number(e.target.value) })}
+          type="number"
+          min={0}
+          value={params.maxGenerations}
+          onChange={(e) => onLiveChange({ maxGenerations: Math.max(0, Number(e.target.value)) })}
         />
       </label>
 
@@ -102,6 +183,10 @@ export function ControlPanel(props: ControlPanelProps) {
           ))}
         </select>
         <p className="hint">Determines which creatures survive to reproduce at the end of each generation. Takes effect next generation.</p>
+        <label className="field checkbox">
+          <input type="checkbox" checked={showSurvivorPreview} onChange={(e) => onToggleSurvivorPreview(e.target.checked)} />
+          <span>Preview who'd survive right now</span>
+        </label>
       </fieldset>
 
       <fieldset className="field-group">
@@ -116,18 +201,31 @@ export function ControlPanel(props: ControlPanelProps) {
       </fieldset>
 
       <fieldset className="field-group">
+        <legend>Terrain</legend>
+        <select value={params.terrainType} onChange={(e) => onLiveChange({ terrainType: Number(e.target.value) as TerrainType })}>
+          {Object.entries(TERRAIN_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <p className="hint">
+          Cold terrain (blue) slows movement, hot terrain (amber) speeds it up -- a stand-in for snow/mud/elevation. Never blocks outright the way
+          barriers do. Creatures can sense their current terrain temperature.
+        </p>
+      </fieldset>
+
+      <fieldset className="field-group">
         <legend>Genetics</legend>
-        <label className="field">
-          <span>Point mutation rate ({(params.pointMutationRate * 100).toFixed(2)}%)</span>
-          <input
-            type="range"
-            min={0}
-            max={0.05}
-            step={0.0005}
-            value={params.pointMutationRate}
-            onChange={(e) => onLiveChange({ pointMutationRate: Number(e.target.value) })}
-          />
-        </label>
+        <SliderField
+          label="Point mutation rate"
+          value={params.pointMutationRate}
+          min={0}
+          max={0.05}
+          step={0.0005}
+          formatValue={(v) => `${(v * 100).toFixed(2)}%`}
+          onChange={(v) => onLiveChange({ pointMutationRate: v })}
+        />
         <label className="field checkbox">
           <input type="checkbox" checked={params.sexualReproduction} onChange={(e) => onLiveChange({ sexualReproduction: e.target.checked })} />
           <span>Sexual reproduction (two parents)</span>
@@ -144,32 +242,44 @@ export function ControlPanel(props: ControlPanelProps) {
           <input type="checkbox" checked={params.killEnable} onChange={(e) => onLiveChange({ killEnable: e.target.checked })} />
           <span>Allow killing neighbors</span>
         </label>
+        {params.killEnable && (
+          <label className="field checkbox">
+            <input
+              type="checkbox"
+              checked={params.killUsesTrueRng}
+              onChange={(e) => onLiveChange({ killUsesTrueRng: e.target.checked })}
+            />
+            <span>Kill decisions use true RNG (drand/Cloudflare)</span>
+          </label>
+        )}
+        {params.killEnable && params.killUsesTrueRng && (
+          <p className="hint">
+            Each kill roll draws from a stream reseeded from a real drand beacon fetch at the start of every generation (falls back to the
+            previous seed if the fetch fails).
+          </p>
+        )}
       </fieldset>
 
       <fieldset className="field-group">
         <legend>Sensing</legend>
-        <label className="field">
-          <span>Population sensor radius ({params.populationSensorRadius.toFixed(1)})</span>
-          <input
-            type="range"
-            min={0.5}
-            max={10}
-            step={0.5}
-            value={params.populationSensorRadius}
-            onChange={(e) => onLiveChange({ populationSensorRadius: Number(e.target.value) })}
-          />
-        </label>
-        <label className="field">
-          <span>Pheromone sensor radius ({params.signalSensorRadius.toFixed(1)})</span>
-          <input
-            type="range"
-            min={0.5}
-            max={10}
-            step={0.5}
-            value={params.signalSensorRadius}
-            onChange={(e) => onLiveChange({ signalSensorRadius: Number(e.target.value) })}
-          />
-        </label>
+        <SliderField
+          label="Population sensor radius"
+          value={params.populationSensorRadius}
+          min={0.5}
+          max={10}
+          step={0.5}
+          formatValue={(v) => v.toFixed(1)}
+          onChange={(v) => onLiveChange({ populationSensorRadius: v })}
+        />
+        <SliderField
+          label="Pheromone sensor radius"
+          value={params.signalSensorRadius}
+          min={0.5}
+          max={10}
+          step={0.5}
+          formatValue={(v) => v.toFixed(1)}
+          onChange={(v) => onLiveChange({ signalSensorRadius: v })}
+        />
         <label className="field checkbox">
           <input type="checkbox" checked={showPheromones} onChange={(e) => onTogglePheromones(e.target.checked)} />
           <span>Show pheromone overlay</span>
@@ -177,73 +287,55 @@ export function ControlPanel(props: ControlPanelProps) {
       </fieldset>
 
       <fieldset className="field-group">
+        <legend>Export</legend>
+        <div className="button-row">
+          <button onClick={onExportSnapshot}>PNG snapshot</button>
+          <button onClick={onExportConfig}>Config (JSON)</button>
+          <button onClick={onExportStats}>Stats (CSV)</button>
+        </div>
+        <div className="button-row">
+          <button className={isRecording ? 'active' : ''} onClick={onToggleRecording}>
+            {isRecording ? '⏹ Stop recording' : '⏺ Record video (WebM)'}
+          </button>
+        </div>
+      </fieldset>
+
+      <fieldset className="field-group">
         <legend>World &amp; population (requires restart)</legend>
-        <label className="field">
-          <span>World width ({pending.sizeX})</span>
-          <input
-            type="range"
-            min={32}
-            max={256}
-            step={8}
-            value={pending.sizeX}
-            onChange={(e) => setPending((p) => ({ ...p, sizeX: Number(e.target.value) }))}
-          />
-        </label>
-        <label className="field">
-          <span>World height ({pending.sizeY})</span>
-          <input
-            type="range"
-            min={32}
-            max={256}
-            step={8}
-            value={pending.sizeY}
-            onChange={(e) => setPending((p) => ({ ...p, sizeY: Number(e.target.value) }))}
-          />
-        </label>
-        <label className="field">
-          <span>Population ({pending.population})</span>
-          <input
-            type="range"
-            min={50}
-            max={6000}
-            step={50}
-            value={pending.population}
-            onChange={(e) => setPending((p) => ({ ...p, population: Number(e.target.value) }))}
-          />
-        </label>
-        <label className="field">
-          <span>Initial genome length ({pending.genomeInitialLength})</span>
-          <input
-            type="range"
-            min={4}
-            max={128}
-            step={1}
-            value={pending.genomeInitialLength}
-            onChange={(e) => setPending((p) => ({ ...p, genomeInitialLength: Number(e.target.value) }))}
-          />
-        </label>
-        <label className="field">
-          <span>Max genome length ({pending.genomeMaxLength})</span>
-          <input
-            type="range"
-            min={pending.genomeInitialLength}
-            max={500}
-            step={1}
-            value={pending.genomeMaxLength}
-            onChange={(e) => setPending((p) => ({ ...p, genomeMaxLength: Number(e.target.value) }))}
-          />
-        </label>
-        <label className="field">
-          <span>Max internal neurons ({pending.maxNumberNeurons})</span>
-          <input
-            type="range"
-            min={0}
-            max={GPU_MAX_NEURONS}
-            step={1}
-            value={pending.maxNumberNeurons}
-            onChange={(e) => setPending((p) => ({ ...p, maxNumberNeurons: Number(e.target.value) }))}
-          />
-        </label>
+        <SliderField label="World width" value={pending.sizeX} min={32} max={256} step={8} onChange={(v) => setPending((p) => ({ ...p, sizeX: v }))} />
+        <SliderField label="World height" value={pending.sizeY} min={32} max={256} step={8} onChange={(v) => setPending((p) => ({ ...p, sizeY: v }))} />
+        <SliderField
+          label="Population"
+          value={pending.population}
+          min={50}
+          max={6000}
+          step={50}
+          onChange={(v) => setPending((p) => ({ ...p, population: v }))}
+        />
+        <SliderField
+          label="Initial genome length"
+          value={pending.genomeInitialLength}
+          min={4}
+          max={128}
+          step={1}
+          onChange={(v) => setPending((p) => ({ ...p, genomeInitialLength: v }))}
+        />
+        <SliderField
+          label="Max genome length"
+          value={pending.genomeMaxLength}
+          min={pending.genomeInitialLength}
+          max={500}
+          step={1}
+          onChange={(v) => setPending((p) => ({ ...p, genomeMaxLength: v }))}
+        />
+        <SliderField
+          label="Max internal neurons"
+          value={pending.maxNumberNeurons}
+          min={0}
+          max={GPU_MAX_NEURONS}
+          step={1}
+          onChange={(v) => setPending((p) => ({ ...p, maxNumberNeurons: v }))}
+        />
         <label className="field checkbox">
           <input type="checkbox" checked={pending.deterministic} onChange={(e) => setPending((p) => ({ ...p, deterministic: e.target.checked }))} />
           <span>Deterministic (seeded) RNG</span>
@@ -258,6 +350,10 @@ export function ControlPanel(props: ControlPanelProps) {
             />
           </label>
         )}
+        <button className="secondary" disabled={rngFetchStatus === 'loading'} onClick={handleFetchTrueRandomSeed}>
+          {rngFetchStatus === 'loading' ? 'Fetching…' : '🎲 True random seed (drand/Cloudflare)'}
+        </button>
+        {rngFetchStatus === 'error' && <p className="hint error">Couldn't reach the randomness beacon — check your connection and try again.</p>}
         <button className="primary" disabled={!structuralDirty} onClick={() => onApplyStructural(pending)}>
           Apply &amp; restart
         </button>

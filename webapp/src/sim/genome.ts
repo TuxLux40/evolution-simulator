@@ -197,8 +197,18 @@ function applyPointMutations(genome: Genome, p: SimParams, rng: Rng): void {
   }
 }
 
+export interface ParentCandidate {
+  uid: number;
+  genome: Genome;
+}
+
+export interface ChildGenomeResult {
+  genome: Genome;
+  parentUids: [number, number];
+}
+
 /** Combines one or two parent genomes (with mutation) into a child genome. */
-export function generateChildGenome(parentGenomes: Genome[], p: SimParams, rng: Rng): Genome {
+export function generateChildGenome(parentGenomes: ParentCandidate[], p: SimParams, rng: Rng): ChildGenomeResult {
   let parent1Idx: number;
   let parent2Idx: number;
 
@@ -212,8 +222,8 @@ export function generateChildGenome(parentGenomes: Genome[], p: SimParams, rng: 
     parent2Idx = rng.nextInt(0, parentGenomes.length - 1);
   }
 
-  const g1 = parentGenomes[parent1Idx];
-  const g2 = parentGenomes[parent2Idx];
+  const g1 = parentGenomes[parent1Idx].genome;
+  const g2 = parentGenomes[parent2Idx].genome;
 
   let genome: Genome;
 
@@ -237,7 +247,7 @@ export function generateChildGenome(parentGenomes: Genome[], p: SimParams, rng: 
   randomInsertDeletion(genome, p, rng);
   applyPointMutations(genome, p, rng);
   if (genome.length > p.genomeMaxLength) genome.length = p.genomeMaxLength;
-  return genome;
+  return { genome, parentUids: [parentGenomes[parent1Idx].uid, parentGenomes[parent2Idx].uid] };
 }
 
 function genesMatch(a: Gene, b: Gene): boolean {

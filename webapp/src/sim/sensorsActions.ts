@@ -38,7 +38,8 @@ export const Sensor = {
   SIGNAL0: 18,
   SIGNAL0_FWD: 19,
   SIGNAL0_LR: 20,
-  NUM_SENSES: 21,
+  TERRAIN_SPEED: 21,
+  NUM_SENSES: 22,
 } as const;
 export type Sensor = (typeof Sensor)[keyof typeof Sensor];
 
@@ -86,6 +87,7 @@ export const SENSOR_NAMES: Record<Sensor, string> = {
   [Sensor.SIGNAL0]: 'pheromone density',
   [Sensor.SIGNAL0_FWD]: 'pheromone fwd',
   [Sensor.SIGNAL0_LR]: 'pheromone L-R',
+  [Sensor.TERRAIN_SPEED]: 'terrain temperature',
   [Sensor.NUM_SENSES]: '',
 };
 

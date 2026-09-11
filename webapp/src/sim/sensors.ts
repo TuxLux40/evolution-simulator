@@ -1,7 +1,7 @@
 // Port of getSensor.cpp.
 
 import { coordAdd, coordSub, dirToNormalizedCoord, dirRotate90CW, type Coord, type Compass } from './geometry';
-import { visitNeighborhood } from './grid';
+import { visitNeighborhood, TERRAIN_SPEED_COLD, TERRAIN_SPEED_HOT } from './grid';
 import { genomeSimilarity } from './genome';
 import { Sensor } from './sensorsActions';
 import type { Indiv } from './individual';
@@ -210,6 +210,11 @@ export function getSensor(world: SimWorld, indiv: Indiv, sensorNum: Sensor): num
       break;
     case Sensor.SIGNAL0_LR:
       sensorVal = getSignalDensityAlongAxis(world, indiv.loc, dirRotate90CW(indiv.lastMoveDir));
+      break;
+    case Sensor.TERRAIN_SPEED:
+      // Terrain temperature at the current cell, normalized from the
+      // cold..hot speed range to the sensor's 0..1 range.
+      sensorVal = (grid.speedAt(indiv.loc) - TERRAIN_SPEED_COLD) / (TERRAIN_SPEED_HOT - TERRAIN_SPEED_COLD);
       break;
     case Sensor.GENETIC_SIM_FWD: {
       const loc2 = coordAdd(indiv.loc, dirToNormalizedCoord(indiv.lastMoveDir));
