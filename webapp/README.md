@@ -52,6 +52,20 @@ npm run build    # type-checks and produces a static dist/ you can host anywhere
   public API of its own) — real entropy for the one place in the sim where
   it's actually meaningful (life-or-death), without a network call per
   decision.
+- A **Learn** panel (📖 button, bottom-right of the canvas) explaining eleven
+  core evolutionary-biology and neuroevolution concepts -- natural
+  selection, genotype/phenotype, mutation, sexual vs. asexual reproduction,
+  selection pressure, genetic drift, neuroevolution, stigmergy/pheromones,
+  kin selection & altruism, adaptation, and population bottlenecks -- each
+  with a plain-language explanation *and* a note on exactly how it maps to
+  something happening in this simulator. Small **?** icons next to the
+  relevant controls open the panel straight to that topic, so you don't
+  have to go looking for the connection yourself.
+- **Dark/light mode**, defaulting to your OS preference with a manual
+  override (persisted), and a **language switcher** (English/German, also
+  persisted) covering the full UI and the Learn content. (Not translated:
+  the compact sensor/action labels inside the technical brain-diagram SVG
+  -- see "Not built (yet)".)
 - A choice of compute backend for the neural-net evaluation step:
   - **CPU** — walks each creature's neural net in plain JS. Simple, and
     fastest for small-to-medium populations.
@@ -75,7 +89,14 @@ npm run build    # type-checks and produces a static dist/ you can host anywhere
 - `src/render/` — the canvas renderer, the color-from-genome mapping, and
   the brain (neural net) SVG diagram.
 - `src/ui/` — the control panel, stats panel, creature inspector, history
-  chart, and the shared slider+numeric-input field.
+  chart, info tooltip, Learn panel, and the shared slider+numeric-input field.
+- `src/content/topics.ts` — the ordered list of Learn topics; the actual
+  copy (English + German) lives in `src/i18n/translations.ts` alongside
+  every other UI string.
+- `src/i18n/` — the translation dictionary and the `useI18n()` hook/context.
+- `src/theme/` — the light/dark theme context and the canvas color palette
+  it drives (`palette.ts`, since `<canvas>` can't read CSS variables cheaply
+  every frame).
 - `src/export/` — PNG/JSON/CSV/SVG downloads and WebM video recording.
 - `src/App.tsx` — wires the engine to the UI and owns top-level state.
 
@@ -85,6 +106,11 @@ A couple of ideas that came up but aren't in yet: save/load of a running
 simulation's full state, and GIF export (WebM video covers the same need
 with zero extra dependencies). [ilyabrilev's SFML fork](https://github.com/ilyabrilev/biosim4)
 of the original C++ project has both and is worth a look for reference.
+
+Also out of scope for now: translating the compact sensor/action labels
+used only inside the technical brain-diagram SVG, and any language beyond
+English/German (the `src/i18n/translations.ts` dictionary structure makes
+adding one mostly a matter of writing the copy).
 
 ## Deliberate differences from upstream biosim4
 

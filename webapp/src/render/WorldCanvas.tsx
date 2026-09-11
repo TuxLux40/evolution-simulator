@@ -1,6 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { SimulationEngine, EngineSnapshot } from '../sim/engine';
 import { colorFromHash } from './colorFromGenome';
+import { CANVAS_PALETTES, type CanvasPalette } from '../theme/palette';
+import type { ResolvedTheme } from '../theme/ThemeContext';
 
 export interface WorldStats {
   generation: number;
@@ -33,6 +35,7 @@ interface WorldCanvasProps {
   onSelectCreature: (uid: number | null) => void;
   onFollowLost: () => void;
   showSurvivorPreview: boolean;
+  theme: ResolvedTheme;
 }
 
 const FOLLOW_WINDOW = 30; // world cells shown across when following a creature
@@ -94,6 +97,7 @@ function draw(
   view: ViewWindow,
   selectedUid: number | null,
   survivorPreview: Set<number> | null,
+  palette: CanvasPalette,
 ): ViewTransform {
   const spanX = view.vx1 - view.vx0;
   const spanY = view.vy1 - view.vy0;
@@ -102,7 +106,7 @@ function draw(
   const offsetY = (cssHeight - cell * spanY) / 2;
   const transform: ViewTransform = { ...view, cell, offsetX, offsetY };
 
-  ctx.fillStyle = '#0b1220';
+  ctx.fillStyle = palette.background;
   ctx.fillRect(0, 0, cssWidth, cssHeight);
 
   const toCanvasX = (worldX: number) => offsetX + (worldX - view.vx0) * cell;
@@ -115,7 +119,7 @@ function draw(
       for (let y = view.vy0; y < view.vy1; y++) {
         const mag = snapshot.signalMagnitudeAt(x, y);
         if (mag === 0) continue;
-        ctx.fillStyle = `rgba(56, 189, 248, ${Math.min(0.5, mag / 255)})`;
+        ctx.fillStyle = `rgba(${palette.pheromone}, ${Math.min(0.5, mag / 255)})`;
         ctx.fillRect(toCanvasX(x), toCanvasY(y), cell, cell);
       }
     }
@@ -123,16 +127,18 @@ function draw(
 
   for (const t of snapshot.terrainLocations) {
     if (!inView(t.x, t.y)) continue;
-    // t.speed is 0.35 (cold) .. 1.75 (hot), 1.0 neutral -- map to a blue..amber tint.
+    // t.speed is 0.35 (cold) .. 1.75 (hot), 1.0 neutral -- interpolate between the palette's cold/hot tints.
     const warmth = Math.max(0, Math.min(1, (t.speed - 0.35) / (1.75 - 0.35)));
-    const r = Math.round(30 + warmth * 160);
-    const g = Math.round(60 + warmth * 60);
-    const b = Math.round(140 - warmth * 100);
+    const [r0, g0, b0] = palette.terrainCold;
+    const [r1, g1, b1] = palette.terrainHot;
+    const r = Math.round(r0 + (r1 - r0) * warmth);
+    const g = Math.round(g0 + (g1 - g0) * warmth);
+    const b = Math.round(b0 + (b1 - b0) * warmth);
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.35)`;
     ctx.fillRect(toCanvasX(t.x), toCanvasY(t.y), cell, cell);
   }
 
-  ctx.fillStyle = '#374151';
+  ctx.fillStyle = palette.barrier;
   for (const b of snapshot.barrierLocations) {
     if (!inView(b.x, b.y)) continue;
     ctx.fillRect(toCanvasX(b.x), toCanvasY(b.y), cell, cell);
@@ -154,7 +160,7 @@ function draw(
     }
     if (indiv.uid === selectedUid) selectedCanvasPos = { cx, cy };
     if (survivorPreview?.has(indiv.uid)) {
-      ctx.strokeStyle = 'rgba(74, 222, 128, 0.7)';
+      ctx.strokeStyle = `rgba(${palette.survivorRing}, 0.7)`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(cx, cy, Math.max(dotSize * 0.7, 3), 0, Math.PI * 2);
@@ -163,7 +169,7 @@ function draw(
   }
 
   if (selectedCanvasPos) {
-    ctx.strokeStyle = '#facc15';
+    ctx.strokeStyle = palette.selectionRing;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(selectedCanvasPos.cx, selectedCanvasPos.cy, Math.max(dotSize, 6), 0, Math.PI * 2);
@@ -187,6 +193,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
     onSelectCreature,
     onFollowLost,
     showSurvivorPreview,
+    theme,
   },
   ref,
 ) {
@@ -198,6 +205,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
   const selectedUidRef = useRef(selectedUid);
   const followUidRef = useRef(followUid);
   const showSurvivorPreviewRef = useRef(showSurvivorPreview);
+  const themeRef = useRef(theme);
   const onStatsRef = useRef(onStats);
   const onRunCompleteRef = useRef(onRunComplete);
   const onFollowLostRef = useRef(onFollowLost);
@@ -217,6 +225,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
   selectedUidRef.current = selectedUid;
   followUidRef.current = followUid;
   showSurvivorPreviewRef.current = showSurvivorPreview;
+  themeRef.current = theme;
   onStatsRef.current = onStats;
   onRunCompleteRef.current = onRunComplete;
   onFollowLostRef.current = onFollowLost;
@@ -386,6 +395,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
         view,
         selectedUidRef.current,
         survivorPreviewRef.current,
+        CANVAS_PALETTES[themeRef.current],
       );
       lastTransformRef.current = transform;
 

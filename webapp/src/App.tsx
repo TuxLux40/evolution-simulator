@@ -9,12 +9,19 @@ import { WorldCanvas, type WorldStats, type WorldCanvasHandle } from './render/W
 import { ControlPanel, type GpuStatus } from './ui/ControlPanel';
 import { StatsPanel } from './ui/StatsPanel';
 import { CreatureInspector } from './ui/CreatureInspector';
+import { LearnPanel } from './ui/LearnPanel';
 import { exportConfigJSON, exportStatsCSV, exportCanvasPNG, CanvasVideoRecorder } from './export/exporters';
+import { useTheme, type ThemeMode } from './theme/ThemeContext';
+import { useI18n, LANGUAGES } from './i18n/I18nContext';
+import type { Language } from './i18n/translations';
+import type { TopicKey } from './content/topics';
 
 function App() {
   const [engine] = useState(() => new SimulationEngine(DEFAULT_PARAMS, new CpuFeedForwardBackend()));
   const canvasHandleRef = useRef<WorldCanvasHandle | null>(null);
   const [recorder] = useState(() => new CanvasVideoRecorder());
+  const { mode: themeMode, resolvedTheme, setMode: setThemeMode } = useTheme();
+  const { language, setLanguage, t } = useI18n();
 
   const [params, setParams] = useState<SimParams>({ ...DEFAULT_PARAMS });
   const [running, setRunning] = useState(true);
@@ -26,6 +33,7 @@ function App() {
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [followUid, setFollowUid] = useState<number | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [learnTopic, setLearnTopic] = useState<TopicKey | null | undefined>(undefined); // undefined = closed
 
   useEffect(() => {
     let cancelled = false;
@@ -113,11 +121,31 @@ function App() {
     }
   };
 
+  const openLearn = (topic: TopicKey) => setLearnTopic(topic);
+
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>Evolution Simulator</h1>
-        <p>Interactive natural-selection sandbox — a web port of biosim4. Tune the world, watch generations evolve, live.</p>
+        <div className="app-header-text">
+          <h1>{t('app.title')}</h1>
+          <p>{t('app.tagline')}</p>
+        </div>
+        <div className="app-header-controls">
+          <select aria-label={t('header.language')} value={language} onChange={(e) => setLanguage(e.target.value as Language)}>
+            {Object.entries(LANGUAGES).map(([code, label]) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <div className="theme-toggle-group">
+            {(['light', 'dark', 'system'] as ThemeMode[]).map((m) => (
+              <button key={m} className={themeMode === m ? 'active' : ''} onClick={() => setThemeMode(m)} title={t(`header.theme${m[0].toUpperCase()}${m.slice(1)}`)}>
+                {m === 'light' ? '☀️' : m === 'dark' ? '🌙' : '💻'}
+              </button>
+            ))}
+          </div>
+        </div>
       </header>
       <div className="app-body">
         <ControlPanel
@@ -142,6 +170,7 @@ function App() {
           onExportSnapshot={handleExportSnapshot}
           isRecording={isRecording}
           onToggleRecording={handleToggleRecording}
+          onOpenLearn={openLearn}
         />
         <main className="canvas-area">
           <WorldCanvas
@@ -158,16 +187,20 @@ function App() {
             onSelectCreature={handleSelectCreature}
             onFollowLost={handleFollowLost}
             showSurvivorPreview={showSurvivorPreview}
+            theme={resolvedTheme}
           />
           {stats?.isFinished && (
             <div className="run-complete-banner">
-              <span>Run complete — reached generation {stats.generation}.</span>
-              <button onClick={() => handleLiveChange({ maxGenerations: params.maxGenerations + 50 })}>Run 50 more</button>
+              <span>{t('app.runComplete', { gen: stats.generation })}</span>
+              <button onClick={() => handleLiveChange({ maxGenerations: params.maxGenerations + 50 })}>{t('app.run50More')}</button>
               <button className="secondary" onClick={() => handleLiveChange({ maxGenerations: 0 })}>
-                Remove limit
+                {t('app.removeLimit')}
               </button>
             </div>
           )}
+          <button className="learn-button" onClick={() => setLearnTopic(null)}>
+            {t('learn.button')}
+          </button>
         </main>
         {selectedUid !== null ? (
           <CreatureInspector
@@ -178,11 +211,13 @@ function App() {
             onToggleFollow={handleToggleFollow}
             onClose={() => clearSelection()}
             onSelectUid={setSelectedUid}
+            onOpenLearn={openLearn}
           />
         ) : (
-          <StatsPanel stats={stats} />
+          <StatsPanel stats={stats} onOpenLearn={openLearn} />
         )}
       </div>
+      {learnTopic !== undefined && <LearnPanel initialTopic={learnTopic} onClose={() => setLearnTopic(undefined)} />}
     </div>
   );
 }

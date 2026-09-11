@@ -3,6 +3,9 @@ import type { SimulationEngine, IndividualDetail } from '../sim/engine';
 import { BrainDiagram } from '../render/BrainDiagram';
 import { colorFromHash } from '../render/colorFromGenome';
 import { exportSvgElement } from '../export/exporters';
+import { useI18n } from '../i18n/I18nContext';
+import { InfoTooltip } from './InfoTooltip';
+import type { TopicKey } from '../content/topics';
 
 interface CreatureInspectorProps {
   engine: SimulationEngine;
@@ -11,9 +14,11 @@ interface CreatureInspectorProps {
   onToggleFollow: () => void;
   onClose: () => void;
   onSelectUid: (uid: number) => void;
+  onOpenLearn: (topic: TopicKey) => void;
 }
 
-export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, onClose, onSelectUid }: CreatureInspectorProps) {
+export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, onClose, onSelectUid, onOpenLearn }: CreatureInspectorProps) {
+  const { t } = useI18n();
   const [detail, setDetail] = useState<IndividualDetail | null>(() => engine.getIndividualDetail(uid));
   const brainContainerRef = useRef<HTMLDivElement | null>(null);
   const [editingNeuron, setEditingNeuron] = useState<number | null>(null);
@@ -61,10 +66,10 @@ export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, on
     return (
       <div className="panel inspector-panel">
         <div className="inspector-header">
-          <h2>Creature #{uid}</h2>
+          <h2>{t('inspector.creature', { uid })}</h2>
           <button onClick={onClose}>✕</button>
         </div>
-        <p className="hint">No longer tracked (its generation has ended).</p>
+        <p className="hint">{t('inspector.noLongerTracked')}</p>
       </div>
     );
   }
@@ -74,70 +79,73 @@ export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, on
   return (
     <div className="panel inspector-panel">
       <div className="inspector-header">
-        <h2 style={{ color: colorFromHash(detail.colorHash) }}>Creature #{detail.uid}</h2>
+        <h2 style={{ color: colorFromHash(detail.colorHash) }}>{t('inspector.creature', { uid: detail.uid })}</h2>
         <button onClick={onClose}>✕</button>
       </div>
 
       <div className="button-row">
         <button className={isFollowing ? 'active' : ''} onClick={onToggleFollow} disabled={!detail.alive}>
-          {isFollowing ? '📍 Following' : '📍 Follow'}
+          {isFollowing ? t('inspector.following') : t('inspector.follow')}
         </button>
       </div>
 
       <div className="stat-row">
-        <span>Status</span>
-        <strong>{detail.alive ? 'Alive' : 'Dead'}</strong>
+        <span>{t('inspector.status')}</span>
+        <strong>{detail.alive ? t('inspector.alive') : t('inspector.dead')}</strong>
       </div>
       <div className="stat-row">
-        <span>Generation</span>
+        <span>{t('inspector.generation')}</span>
         <strong>{detail.generation}</strong>
       </div>
       <div className="stat-row">
-        <span>Age</span>
-        <strong>{detail.age} steps</strong>
+        <span>{t('inspector.age')}</span>
+        <strong>{t('inspector.ageSteps', { n: detail.age })}</strong>
       </div>
       <div className="stat-row">
-        <span>Location</span>
+        <span>{t('inspector.location')}</span>
         <strong>
           ({detail.loc.x}, {detail.loc.y})
         </strong>
       </div>
       <div className="stat-row">
-        <span>Birth location</span>
+        <span>{t('inspector.birthLocation')}</span>
         <strong>
           ({detail.birthLoc.x}, {detail.birthLoc.y})
         </strong>
       </div>
       <div className="stat-row">
-        <span>Migration distance</span>
+        <span>{t('inspector.migrationDistance')}</span>
         <strong>{detail.migrationDistance}</strong>
       </div>
       <div className="stat-row">
-        <span>Genome length</span>
-        <strong>{detail.genomeLength} genes</strong>
+        <span>{t('inspector.genomeLength')}</span>
+        <strong>{t('inspector.genomeLengthGenes', { n: detail.genomeLength })}</strong>
       </div>
       <div className="stat-row">
-        <span>Neurons / connections</span>
+        <span>{t('inspector.neuronsConnections')}</span>
         <strong>
           {detail.neurons.length} / {detail.connections.length}
         </strong>
       </div>
       <div className="stat-row">
-        <span>Responsiveness</span>
+        <span>{t('inspector.responsiveness')}</span>
         <strong>{detail.responsiveness.toFixed(2)}</strong>
       </div>
 
-      <h3>Lineage</h3>
+      <h3>
+        {t('inspector.lineage')}
+        <InfoTooltip topicKey="genotypePhenotype" onOpenLearn={onOpenLearn} />
+      </h3>
       {lineage.length <= 1 ? (
-        <p className="hint">{detail.generation === 0 ? 'Original generation -- no parents.' : 'Parents no longer in the lineage log.'}</p>
+        <p className="hint">{detail.generation === 0 ? t('inspector.originalGeneration') : t('inspector.parentsGone')}</p>
       ) : (
         <ul className="lineage-list">
           {lineage.slice(1).map((ancestor) => (
             <li key={ancestor.uid}>
               <span className="lineage-swatch" style={{ background: colorFromHash(ancestor.colorHash) }} />
-              gen {ancestor.generation} · #{ancestor.uid}{' '}
+              {t('inspector.genLabel', { gen: ancestor.generation, uid: ancestor.uid })}{' '}
               <button className="link-button" onClick={() => onSelectUid(ancestor.uid)}>
-                view
+                {t('inspector.view')}
               </button>
             </li>
           ))}
@@ -145,22 +153,23 @@ export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, on
       )}
       {detail.parentUids && (
         <p className="hint">
-          Direct parents: #{detail.parentUids[0]}
-          {detail.parentUids[1] !== detail.parentUids[0] ? `, #${detail.parentUids[1]}` : ' (asexual)'}
+          {t('inspector.directParents', { p1: detail.parentUids[0] })}
+          {detail.parentUids[1] !== detail.parentUids[0]
+            ? t('inspector.directParentsSecond', { p2: detail.parentUids[1] })
+            : t('inspector.asexual')}
         </p>
       )}
 
       <div className="inspector-header">
-        <h3 style={{ margin: 0 }}>Brain</h3>
+        <h3 style={{ margin: 0 }}>
+          {t('inspector.brain')}
+          <InfoTooltip topicKey="neuroevolution" onOpenLearn={onOpenLearn} />
+        </h3>
         <button className="link-button" onClick={handleExportBrainSvg}>
-          export SVG
+          {t('inspector.exportSvg')}
         </button>
       </div>
-      {isCpuBackend ? (
-        <p className="hint">Click a neuron to pin it at a fixed value -- it'll stop reacting to its inputs for the rest of this creature's life.</p>
-      ) : (
-        <p className="hint">Neuron editing requires the CPU backend (the GPU compute shader has no notion of a pinned neuron).</p>
-      )}
+      <p className="hint">{isCpuBackend ? t('inspector.neuronEditHintCpu') : t('inspector.neuronEditHintGpu')}</p>
       <div ref={brainContainerRef}>
         <BrainDiagram
           connections={detail.connections}
@@ -174,15 +183,19 @@ export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, on
       {editingNeuron !== null && detail.neurons[editingNeuron] && (
         <div className="field-group">
           <div className="stat-row">
-            <span>Neuron #{editingNeuron}</span>
-            <strong>{detail.neurons[editingNeuron].pinned ? 'Pinned' : detail.neurons[editingNeuron].driven ? 'Driven' : 'Undriven (bias)'}</strong>
+            <span>{t('inspector.neuronLabel', { n: editingNeuron })}</span>
+            <strong>
+              {detail.neurons[editingNeuron].pinned ? t('inspector.pinned') : detail.neurons[editingNeuron].driven ? t('inspector.driven') : t('inspector.undriven')}
+            </strong>
           </div>
           <label className="field checkbox">
             <input type="checkbox" checked={detail.neurons[editingNeuron].pinned} onChange={(e) => handleTogglePin(e.target.checked)} />
-            <span>Pin this neuron</span>
+            <span>{t('inspector.pinThisNeuron')}</span>
           </label>
           <label className="field">
-            <span>Fixed output value ({pendingValue.toFixed(2)})</span>
+            <span>
+              {t('inspector.fixedOutputValue')} ({pendingValue.toFixed(2)})
+            </span>
             <div className="slider-row">
               <input type="range" min={-1} max={1} step={0.01} value={pendingValue} onChange={(e) => handleSlideValue(Number(e.target.value))} />
               <input

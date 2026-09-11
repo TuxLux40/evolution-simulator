@@ -24,28 +24,7 @@ export const Challenge = {
   CENTER_UNWEIGHTED: 40,
 } as const;
 export type Challenge = (typeof Challenge)[keyof typeof Challenge];
-
-export const CHALLENGE_LABELS: Record<Challenge, string> = {
-  [Challenge.CIRCLE]: 'Circle (west quadrant)',
-  [Challenge.RIGHT_HALF]: 'Right half',
-  [Challenge.RIGHT_QUARTER]: 'Right quarter',
-  [Challenge.STRING]: 'Neighbor count (string)',
-  [Challenge.CENTER_WEIGHTED]: 'Center, weighted',
-  [Challenge.CENTER_UNWEIGHTED]: 'Center, unweighted',
-  [Challenge.CORNER]: 'Any corner',
-  [Challenge.CORNER_WEIGHTED]: 'Any corner, weighted',
-  [Challenge.MIGRATE_DISTANCE]: 'Migrate distance',
-  [Challenge.CENTER_SPARSE]: 'Center, sparse',
-  [Challenge.LEFT_EIGHTH]: 'Left eighth',
-  [Challenge.RADIOACTIVE_WALLS]: 'Radioactive walls',
-  [Challenge.AGAINST_ANY_WALL]: 'Against any wall',
-  [Challenge.TOUCH_ANY_WALL]: 'Touch any wall, ever',
-  [Challenge.EAST_WEST_EIGHTHS]: 'East-West eighths',
-  [Challenge.NEAR_BARRIER]: 'Near a barrier',
-  [Challenge.PAIRS]: 'Pairs',
-  [Challenge.LOCATION_SEQUENCE]: 'Visit barriers in sequence',
-  [Challenge.ALTRUISM]: 'Altruism (sacrifice zone)',
-};
+// Display labels for these live in src/i18n/translations.ts (challengeOption.<value>).
 
 // Plain const object instead of TS `enum` (erasableSyntaxOnly build).
 export const BarrierType = {
@@ -58,16 +37,7 @@ export const BarrierType = {
   SPOTS: 6,
 } as const;
 export type BarrierType = (typeof BarrierType)[keyof typeof BarrierType];
-
-export const BARRIER_LABELS: Record<BarrierType, string> = {
-  [BarrierType.NONE]: 'None',
-  [BarrierType.VERTICAL_BAR_CONSTANT]: 'Vertical bar (fixed)',
-  [BarrierType.VERTICAL_BAR_RANDOM]: 'Vertical bar (random)',
-  [BarrierType.FIVE_STAGGERED_BLOCKS]: 'Five staggered blocks',
-  [BarrierType.HORIZONTAL_BAR]: 'Horizontal bar',
-  [BarrierType.FLOATING_ISLAND]: 'Floating island (moves each gen)',
-  [BarrierType.SPOTS]: 'Sequence of spots',
-};
+// Display labels for these live in src/i18n/translations.ts (barrierOption.<value>).
 
 // A second, independent layer alongside barriers: patches of terrain with a
 // temperature that speeds up or slows down movement instead of blocking it
@@ -82,15 +52,7 @@ export const TerrainType = {
   RANDOM_SPOTS: 5,
 } as const;
 export type TerrainType = (typeof TerrainType)[keyof typeof TerrainType];
-
-export const TERRAIN_LABELS: Record<TerrainType, string> = {
-  [TerrainType.NONE]: 'None',
-  [TerrainType.GRADIENT]: 'Temperature gradient (cold→hot)',
-  [TerrainType.COLD_PATCH_CENTER]: 'Cold patch (center, slow)',
-  [TerrainType.HOT_PATCH_CENTER]: 'Hot patch (center, fast)',
-  [TerrainType.ALTERNATING_BANDS]: 'Alternating cold/hot bands',
-  [TerrainType.RANDOM_SPOTS]: 'Random hot/cold spots',
-};
+// Display labels for these live in src/i18n/translations.ts (terrainOption.<value>).
 
 export type ComputeBackend = 'cpu' | 'gpu';
 
