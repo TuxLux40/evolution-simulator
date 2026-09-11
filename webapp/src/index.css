@@ -1,0 +1,65 @@
+:root {
+  color-scheme: light;
+  font: 15px/1.5 system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  --color-bg: #eef2f7;
+  --color-bg-elevated: #ffffff;
+  --color-bg-elevated-2: #f8fafc;
+  --color-bg-hover: #e2e8f0;
+  --color-border: #d8dee7;
+  --color-border-strong: #b8c2d1;
+  --color-text: #101828;
+  --color-text-secondary: #4b5768;
+  --color-text-muted: #6b7688;
+  --color-accent: #2563eb;
+  --color-accent-border: #3b82f6;
+  --color-accent-text: #ffffff;
+  --color-danger: #dc2626;
+  --color-link: #0284c7;
+  --color-success: #15803d;
+  --color-warning: #b45309;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-bg: #0b1220;
+  --color-bg-elevated: #1f2937;
+  --color-bg-elevated-2: #111827;
+  --color-bg-hover: #374151;
+  --color-border: #1f2937;
+  --color-border-strong: #374151;
+  --color-text: #e5e7eb;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
+  --color-accent: #2563eb;
+  --color-accent-border: #3b82f6;
+  --color-accent-text: #ffffff;
+  --color-danger: #f87171;
+  --color-link: #38bdf8;
+  --color-success: #4ade80;
+  --color-warning: #facc15;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+input,
+select {
+  font: inherit;
+}
