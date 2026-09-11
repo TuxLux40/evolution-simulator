@@ -62,7 +62,7 @@ export interface IndividualDetail {
   longProbeDist: number;
   colorHash: number;
   parentUids: [number, number] | null;
-  neurons: Array<{ output: number; driven: boolean }>;
+  neurons: Array<{ output: number; driven: boolean; pinned: boolean }>;
   connections: Gene[];
 }
 
@@ -403,6 +403,27 @@ export class SimulationEngine {
       neurons: indiv.nnet.neurons.map((n) => ({ ...n })),
       connections: indiv.nnet.connections.map((c) => ({ ...c })),
     };
+  }
+
+  /**
+   * Pins or unpins one of a live creature's neurons, optionally forcing its
+   * output value. A pinned neuron is skipped by feedForward's normal
+   * tanh(accumulator) update, so it holds whatever value it's set to for the
+   * rest of that creature's life -- the same mechanism the sim already uses
+   * for naturally "undriven" neurons (bias nodes), just applied on demand.
+   * CPU-backend only: the GPU compute shader has no notion of pinned
+   * neurons, so overrides silently have no additional effect there (see
+   * ControlPanel/CreatureInspector, which gray the controls out on GPU).
+   */
+  setNeuronOverride(uid: number, neuronIndex: number, pinned: boolean, value?: number): void {
+    const index = this.uidToIndex.get(uid);
+    if (index === undefined) return;
+    const indiv = this.individuals[index];
+    if (!indiv || indiv.uid !== uid) return;
+    const neuron = indiv.nnet.neurons[neuronIndex];
+    if (!neuron) return;
+    neuron.pinned = pinned;
+    if (value !== undefined) neuron.output = Math.max(-1, Math.min(1, value));
   }
 
   /** Walks the (memory-bounded) lineage log backward from `uid`, oldest ancestor last. */

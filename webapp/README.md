@@ -24,13 +24,19 @@ npm run build    # type-checks and produces a static dist/ you can host anywhere
 - A live canvas showing every creature moving every simulation step, colored
   by a hash of its genome, with an optional pheromone-trail overlay and a
   "preview who'd survive right now" highlight for the active challenge.
-  Click any creature to select it; drag-free camera **follow** keeps it
-  centered as it moves.
+  Scroll to zoom (cursor-anchored) and drag to pan; click any creature to
+  select it, and camera **follow** keeps it centered as it moves (a "Reset
+  view" button appears whenever you've panned/zoomed away from the fit-to-
+  window default).
 - A **creature inspector**: status, age, location, migration distance,
   genome/neuron/connection counts, a lineage chain (parents and ancestors,
-  clickable to jump between them), and a live SVG diagram of its neural net
-  (sensors → neurons → actions, edges colored/weighted by connection sign
-  and strength) — exportable as its own SVG file.
+  clickable to jump between them), and a live, *editable* SVG diagram of its
+  neural net (sensors → neurons → actions, edges colored/weighted by
+  connection sign and strength) — click a neuron to pin it at a fixed value
+  (it stops reacting to its inputs for the rest of that creature's life),
+  and export the diagram as its own SVG file. Neuron pinning is CPU-backend
+  only (the GPU compute shader has no notion of a pinned neuron; the
+  controls gray themselves out on GPU).
 - **Terrain**: patches of cold (slow) or hot (fast) ground layered
   independently of barriers — a gradient, bands, patches, or random spots —
   which creatures can also sense directly. A stand-in for snow/mud/elevation
@@ -75,13 +81,10 @@ npm run build    # type-checks and produces a static dist/ you can host anywhere
 
 ## Not built (yet)
 
-A few ideas that came up but aren't in yet: free mouse pan/zoom (there's
-click-to-select and follow-a-creature, but no drag/scroll camera), a neuron
-editor (the brain diagram is read-only), save/load of a running simulation's
-full state, and GIF export (WebM video covers the same need with zero extra
-dependencies). [ilyabrilev's SFML fork](https://github.com/ilyabrilev/biosim4)
-of the original C++ project has some of these and is worth a look for
-reference.
+A couple of ideas that came up but aren't in yet: save/load of a running
+simulation's full state, and GIF export (WebM video covers the same need
+with zero extra dependencies). [ilyabrilev's SFML fork](https://github.com/ilyabrilev/biosim4)
+of the original C++ project has both and is worth a look for reference.
 
 ## Deliberate differences from upstream biosim4
 

@@ -48,6 +48,8 @@ export function makeRandomGenome(rng: Rng, length: number): Genome {
 export interface NeuralNetNeuron {
   output: number;
   driven: boolean;
+  /** When true, feedForward leaves .output alone instead of recomputing it from inputs -- a manual "pin" from the creature inspector's neuron editor. */
+  pinned: boolean;
 }
 
 export interface NeuralNet {
@@ -150,6 +152,7 @@ export function createWiringFromGenome(genome: Genome, p: SimParams): NeuralNet 
   const neurons: NeuralNetNeuron[] = sortedKeys.map((key) => ({
     output: initialNeuronOutput,
     driven: nodeMap.get(key)!.numInputsFromSensorsOrOtherNeurons !== 0,
+    pinned: false,
   }));
 
   return { connections: finalConnections, neurons };

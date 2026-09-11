@@ -294,7 +294,21 @@ button.secondary {
 }
 
 .world-canvas-container canvas {
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+}
+
+.world-canvas-container canvas:active {
+  cursor: grabbing;
+}
+
+.reset-view-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  font-size: 12px;
+  padding: 4px 10px;
 }
 
 .run-complete-banner {

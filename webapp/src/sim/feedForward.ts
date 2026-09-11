@@ -15,7 +15,7 @@ export function feedForward(world: SimWorld, indiv: Indiv): Float32Array {
     if (conn.sinkType === SINK_ACTION && !neuronOutputsComputed) {
       for (let i = 0; i < indiv.nnet.neurons.length; i++) {
         const neuron = indiv.nnet.neurons[i];
-        if (neuron.driven) neuron.output = Math.tanh(neuronAccumulators[i]);
+        if (neuron.driven && !neuron.pinned) neuron.output = Math.tanh(neuronAccumulators[i]);
       }
       neuronOutputsComputed = true;
     }

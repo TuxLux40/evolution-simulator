@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { SimulationEngine, EngineSnapshot } from '../sim/engine';
 import { colorFromHash } from './colorFromGenome';
 
@@ -16,6 +16,7 @@ export interface WorldStats {
 
 export interface WorldCanvasHandle {
   getCanvas: () => HTMLCanvasElement | null;
+  resetView: () => void;
 }
 
 interface WorldCanvasProps {
@@ -35,6 +36,8 @@ interface WorldCanvasProps {
 }
 
 const FOLLOW_WINDOW = 30; // world cells shown across when following a creature
+const DRAG_THRESHOLD_PX = 4;
+const ZOOM_STEP = 1.15;
 
 interface ViewWindow {
   vx0: number;
@@ -43,19 +46,43 @@ interface ViewWindow {
   vy1: number;
 }
 
+/** A user-controlled pan/zoom window, independent of the follow-a-creature window. */
+interface ManualView {
+  vx0: number;
+  vy0: number;
+  spanX: number;
+  spanY: number;
+}
+
 interface ViewTransform extends ViewWindow {
   cell: number;
   offsetX: number;
   offsetY: number;
 }
 
-function computeViewWindow(sizeX: number, sizeY: number, followPos: { x: number; y: number } | null): ViewWindow {
-  if (!followPos) return { vx0: 0, vy0: 0, vx1: sizeX, vy1: sizeY };
+function computeFollowWindow(sizeX: number, sizeY: number, followPos: { x: number; y: number }): ViewWindow {
   const w = Math.min(FOLLOW_WINDOW, sizeX);
   const h = Math.min(FOLLOW_WINDOW, sizeY);
   const vx0 = Math.max(0, Math.min(sizeX - w, Math.round(followPos.x - w / 2)));
   const vy0 = Math.max(0, Math.min(sizeY - h, Math.round(followPos.y - h / 2)));
   return { vx0, vy0, vx1: vx0 + w, vy1: vy0 + h };
+}
+
+function resolveView(
+  sizeX: number,
+  sizeY: number,
+  followPos: { x: number; y: number } | null,
+  manualView: ManualView | null,
+): ViewWindow {
+  if (followPos) return computeFollowWindow(sizeX, sizeY, followPos);
+  if (manualView) {
+    const spanX = Math.min(manualView.spanX, sizeX);
+    const spanY = Math.min(manualView.spanY, sizeY);
+    const vx0 = Math.max(0, Math.min(sizeX - spanX, manualView.vx0));
+    const vy0 = Math.max(0, Math.min(sizeY - spanY, manualView.vy0));
+    return { vx0, vy0, vx1: vx0 + spanX, vy1: vy0 + spanY };
+  }
+  return { vx0: 0, vy0: 0, vx1: sizeX, vy1: sizeY };
 }
 
 function draw(
@@ -180,6 +207,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
   const lastTransformRef = useRef<ViewTransform | null>(null);
   const lastSnapshotRef = useRef<EngineSnapshot | null>(null);
   const notifiedFinishedRef = useRef(false);
+  const manualViewRef = useRef<ManualView | null>(null);
+  const suppressClickRef = useRef(false);
+  const [isManualView, setIsManualView] = useState(false);
 
   runningRef.current = running;
   stepsPerFrameRef.current = stepsPerFrame;
@@ -191,7 +221,17 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
   onRunCompleteRef.current = onRunComplete;
   onFollowLostRef.current = onFollowLost;
 
-  useImperativeHandle(ref, () => ({ getCanvas: () => canvasRef.current }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      getCanvas: () => canvasRef.current,
+      resetView: () => {
+        manualViewRef.current = null;
+        setIsManualView(false);
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -217,6 +257,89 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
     const ro = new ResizeObserver(resize);
     ro.observe(container);
 
+    const currentManualView = (): ManualView => {
+      if (manualViewRef.current) return manualViewRef.current;
+      const t = lastTransformRef.current;
+      const snapshot = lastSnapshotRef.current;
+      if (t) return { vx0: t.vx0, vy0: t.vy0, spanX: t.vx1 - t.vx0, spanY: t.vy1 - t.vy0 };
+      return { vx0: 0, vy0: 0, spanX: snapshot?.sizeX ?? 1, spanY: snapshot?.sizeY ?? 1 };
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (followUidRef.current !== null) return; // follow mode owns the camera
+      const snapshot = lastSnapshotRef.current;
+      const transform = lastTransformRef.current;
+      if (!snapshot || !transform) return;
+      e.preventDefault();
+
+      const cur = currentManualView();
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      // World point currently under the cursor, using the last-drawn transform.
+      const worldX = cur.vx0 + (px - transform.offsetX) / transform.cell;
+      const worldY = cur.vy0 + cur.spanY - 1 - (py - transform.offsetY) / transform.cell;
+
+      const zoomFactor = e.deltaY > 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      const minSpanX = Math.max(4, snapshot.sizeX / 40);
+      const minSpanY = Math.max(4, snapshot.sizeY / 40);
+      const newSpanX = Math.min(snapshot.sizeX, Math.max(minSpanX, cur.spanX * zoomFactor));
+      const newSpanY = Math.min(snapshot.sizeY, Math.max(minSpanY, cur.spanY * zoomFactor));
+
+      if (newSpanX >= snapshot.sizeX && newSpanY >= snapshot.sizeY) {
+        manualViewRef.current = null;
+        setIsManualView(false);
+        return;
+      }
+
+      // Approximate the same cell size across this (small) zoom step so the
+      // cursor-anchored point stays put; any drift self-corrects next tick.
+      const cell2 = Math.max(1, Math.min(rect.width / newSpanX, rect.height / newSpanY));
+      let newVx0 = worldX - (px - transform.offsetX) / cell2;
+      let newVy0 = worldY - newSpanY + 1 + (py - transform.offsetY) / cell2;
+      newVx0 = Math.max(0, Math.min(snapshot.sizeX - newSpanX, newVx0));
+      newVy0 = Math.max(0, Math.min(snapshot.sizeY - newSpanY, newVy0));
+
+      manualViewRef.current = { vx0: newVx0, vy0: newVy0, spanX: newSpanX, spanY: newSpanY };
+      setIsManualView(true);
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+
+    let drag: { startPx: number; startPy: number; startVx0: number; startVy0: number; spanX: number; spanY: number; moved: boolean } | null = null;
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (followUidRef.current !== null) return;
+      if (e.button !== 0) return;
+      const cur = currentManualView();
+      drag = { startPx: e.clientX, startPy: e.clientY, startVx0: cur.vx0, startVy0: cur.vy0, spanX: cur.spanX, spanY: cur.spanY, moved: false };
+      canvas.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.startPx;
+      const dy = e.clientY - drag.startPy;
+      if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      drag.moved = true;
+      suppressClickRef.current = true;
+      const transform = lastTransformRef.current;
+      const snapshot = lastSnapshotRef.current;
+      if (!transform || !snapshot) return;
+      let newVx0 = drag.startVx0 - dx / transform.cell;
+      let newVy0 = drag.startVy0 + dy / transform.cell;
+      newVx0 = Math.max(0, Math.min(snapshot.sizeX - drag.spanX, newVx0));
+      newVy0 = Math.max(0, Math.min(snapshot.sizeY - drag.spanY, newVy0));
+      manualViewRef.current = { vx0: newVx0, vy0: newVy0, spanX: drag.spanX, spanY: drag.spanY };
+      setIsManualView(true);
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (drag) canvas.releasePointerCapture(e.pointerId);
+      drag = null;
+    };
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+
     async function loop() {
       if (cancelled) return;
       if (runningRef.current) {
@@ -232,10 +355,17 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
       let followPos: { x: number; y: number } | null = null;
       if (followUidRef.current !== null) {
         const found = snapshot.individuals.find((i) => i.uid === followUidRef.current);
-        if (found) followPos = { x: found.x, y: found.y };
-        else onFollowLostRef.current?.();
+        if (found) {
+          followPos = { x: found.x, y: found.y };
+          if (manualViewRef.current) {
+            manualViewRef.current = null;
+            setIsManualView(false);
+          }
+        } else {
+          onFollowLostRef.current?.();
+        }
       }
-      const view = computeViewWindow(snapshot.sizeX, snapshot.sizeY, followPos);
+      const view = resolveView(snapshot.sizeX, snapshot.sizeY, followPos, manualViewRef.current);
 
       if (showSurvivorPreviewRef.current) {
         survivorPreviewThrottleRef.current++;
@@ -288,11 +418,20 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
       cancelled = true;
       ro.disconnect();
       cancelAnimationFrame(raf);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, resetToken]);
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     const transform = lastTransformRef.current;
     const snapshot = lastSnapshotRef.current;
     if (!transform || !snapshot) return;
@@ -319,6 +458,17 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, WorldCanvasProps>(funct
   return (
     <div ref={containerRef} className="world-canvas-container">
       <canvas ref={canvasRef} onClick={handleClick} />
+      {isManualView && followUid === null && (
+        <button
+          className="reset-view-button"
+          onClick={() => {
+            manualViewRef.current = null;
+            setIsManualView(false);
+          }}
+        >
+          ⤢ Reset view
+        </button>
+      )}
     </div>
   );
 });

@@ -16,10 +16,35 @@ interface CreatureInspectorProps {
 export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, onClose, onSelectUid }: CreatureInspectorProps) {
   const [detail, setDetail] = useState<IndividualDetail | null>(() => engine.getIndividualDetail(uid));
   const brainContainerRef = useRef<HTMLDivElement | null>(null);
+  const [editingNeuron, setEditingNeuron] = useState<number | null>(null);
+  const [pendingValue, setPendingValue] = useState(0);
+
+  const isCpuBackend = engine.params.computeBackend === 'cpu';
 
   const handleExportBrainSvg = () => {
     const svg = brainContainerRef.current?.querySelector('svg');
     if (svg) exportSvgElement(svg, `evolution-sim-brain-${uid}`);
+  };
+
+  const handleNeuronClick = (index: number) => {
+    if (!isCpuBackend) return;
+    setEditingNeuron((current) => (current === index ? null : index));
+    setPendingValue(detail?.neurons[index]?.output ?? 0);
+  };
+
+  const handleTogglePin = (checked: boolean) => {
+    if (editingNeuron === null) return;
+    engine.setNeuronOverride(uid, editingNeuron, checked, checked ? pendingValue : undefined);
+    setDetail(engine.getIndividualDetail(uid));
+  };
+
+  const handleSlideValue = (value: number) => {
+    setPendingValue(value);
+    if (editingNeuron === null) return;
+    if (detail?.neurons[editingNeuron]?.pinned) {
+      engine.setNeuronOverride(uid, editingNeuron, true, value);
+      setDetail(engine.getIndividualDetail(uid));
+    }
   };
 
   // Parent mounts one instance per uid (key={uid}), so the useState
@@ -131,9 +156,48 @@ export function CreatureInspector({ engine, uid, isFollowing, onToggleFollow, on
           export SVG
         </button>
       </div>
+      {isCpuBackend ? (
+        <p className="hint">Click a neuron to pin it at a fixed value -- it'll stop reacting to its inputs for the rest of this creature's life.</p>
+      ) : (
+        <p className="hint">Neuron editing requires the CPU backend (the GPU compute shader has no notion of a pinned neuron).</p>
+      )}
       <div ref={brainContainerRef}>
-        <BrainDiagram connections={detail.connections} neurons={detail.neurons} />
+        <BrainDiagram
+          connections={detail.connections}
+          neurons={detail.neurons}
+          editable={isCpuBackend}
+          selectedNeuronIndex={editingNeuron}
+          onNeuronClick={handleNeuronClick}
+        />
       </div>
+
+      {editingNeuron !== null && detail.neurons[editingNeuron] && (
+        <div className="field-group">
+          <div className="stat-row">
+            <span>Neuron #{editingNeuron}</span>
+            <strong>{detail.neurons[editingNeuron].pinned ? 'Pinned' : detail.neurons[editingNeuron].driven ? 'Driven' : 'Undriven (bias)'}</strong>
+          </div>
+          <label className="field checkbox">
+            <input type="checkbox" checked={detail.neurons[editingNeuron].pinned} onChange={(e) => handleTogglePin(e.target.checked)} />
+            <span>Pin this neuron</span>
+          </label>
+          <label className="field">
+            <span>Fixed output value ({pendingValue.toFixed(2)})</span>
+            <div className="slider-row">
+              <input type="range" min={-1} max={1} step={0.01} value={pendingValue} onChange={(e) => handleSlideValue(Number(e.target.value))} />
+              <input
+                type="number"
+                className="slider-number"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={pendingValue}
+                onChange={(e) => handleSlideValue(Number(e.target.value))}
+              />
+            </div>
+          </label>
+        </div>
+      )}
     </div>
   );
 }

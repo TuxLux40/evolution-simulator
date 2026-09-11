@@ -6,13 +6,16 @@ import type { NeuralNetNeuron } from '../sim/genome';
 interface BrainDiagramProps {
   connections: Gene[];
   neurons: NeuralNetNeuron[];
+  editable?: boolean;
+  selectedNeuronIndex?: number | null;
+  onNeuronClick?: (index: number) => void;
 }
 
 const ROW_HEIGHT = 22;
 const COL_X = { sensor: 8, sensorNode: 130, neuron: 260, actionNode: 390, action: 412 };
 const WIDTH = 460;
 
-export function BrainDiagram({ connections, neurons }: BrainDiagramProps) {
+export function BrainDiagram({ connections, neurons, editable, selectedNeuronIndex, onNeuronClick }: BrainDiagramProps) {
   const usedSensors = [...new Set(connections.filter((c) => c.sourceType === SOURCE_SENSOR).map((c) => c.sourceNum as Sensor))].sort((a, b) => a - b);
   const usedActions = [...new Set(connections.filter((c) => c.sinkType === SINK_ACTION).map((c) => c.sinkNum as Action))].sort((a, b) => a - b);
 
@@ -75,9 +78,21 @@ export function BrainDiagram({ connections, neurons }: BrainDiagramProps) {
       ))}
 
       {neurons.map((n, i) => (
-        <g key={`n${i}`}>
-          <circle cx={COL_X.neuron} cy={neuronY.get(i)} r={7} fill={n.driven ? '#a78bfa' : '#4b5563'} stroke="#e5e7eb" strokeWidth={0.5} />
-          <text x={COL_X.neuron} y={(neuronY.get(i) ?? 0) + 3} fontSize={8} fill="#0b1220" textAnchor="middle">
+        <g
+          key={`n${i}`}
+          onClick={editable && onNeuronClick ? () => onNeuronClick(i) : undefined}
+          style={editable ? { cursor: 'pointer' } : undefined}
+        >
+          {selectedNeuronIndex === i && <circle cx={COL_X.neuron} cy={neuronY.get(i)} r={11} fill="none" stroke="#facc15" strokeWidth={1.5} />}
+          <circle
+            cx={COL_X.neuron}
+            cy={neuronY.get(i)}
+            r={7}
+            fill={n.pinned ? '#f59e0b' : n.driven ? '#a78bfa' : '#4b5563'}
+            stroke="#e5e7eb"
+            strokeWidth={0.5}
+          />
+          <text x={COL_X.neuron} y={(neuronY.get(i) ?? 0) + 3} fontSize={8} fill="#0b1220" textAnchor="middle" pointerEvents="none">
             {n.output.toFixed(1)}
           </text>
         </g>
