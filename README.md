@@ -1,432 +1,364 @@
-# biosim4
+<div align="center">
 
-## Status
+# 🧬 evolution-simulator
 
-This project is transitioning to maintenance-only. Thanks to all who contributed 
-improvements to this project. We will continue to welcome bug fixes that enable this
-program to compile and execute, and we welcome discussions about this program
-and related topics in the Issues section.
+**A neural-net creature simulator where behavior evolves through natural selection.**
 
-## What is this?
+[![docker build](https://github.com/TuxLux40/evolution-simulator/actions/workflows/main.yml/badge.svg)](https://github.com/TuxLux40/evolution-simulator/actions/workflows/main.yml)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)
+![OpenMP](https://img.shields.io/badge/parallel-OpenMP-4c8eda)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-This pile of code was used to simulate biological creatures that evolve through natural selection.
-The results of the experiments are summarized in this YouTube video:
+[Quick start](#-quick-start) · [Web app](#-web-app) · [How it works](#-how-it-works) · [Configuration](#%EF%B8%8F-configuration) · [Output](#-output) · [Tools](#-tools) · [Tests](#-tests)
 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"I programmed some creatures. They evolved."
+</div>
 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;https://www.youtube.com/watch?v=N3tRFayqVtk
+---
 
-This command line program lacks a friendly interface, so compiling and executing the program may
-require attention to details. If you ask questions in the Issues,
-I'll try to help if I can. For a nicer user interface, check out the
-[fork of this project](https://github.com/ilyabrilev/biosim4) hosted by @ilyabrilev.
+This repository is a fork of [davidrmiller/biosim4](https://github.com/davidrmiller/biosim4). The
+C++ executable is still called `biosim4`, and all simulator code lives in the `BS` namespace.
 
-## Interactive web app
+A population of creatures lives on a 2D grid. Each creature has a genome that is wired into a small
+neural-net brain. Every generation, only the creatures that meet a selection criterion get to
+reproduce, with mutation and recombination. Over many generations, behaviors emerge.
 
-The [`webapp/`](webapp/) directory contains a browser-based reimplementation of this
-simulator (TypeScript/React, no server required). It lets you tune the world and
-genetics from a control panel, watch every creature move live on a canvas, and
-switch the neural-net evaluation between a CPU and a WebGPU compute backend.
-See [`webapp/README.md`](webapp/README.md) for how to run it.
+The original results are summarized in the video
+[**"I programmed some creatures. They evolved."**](https://www.youtube.com/watch?v=N3tRFayqVtk)
 
-Document Contents
------------------
+> [!NOTE]
+> Upstream is in maintenance-only mode. Bug fixes that keep the program compiling and running are
+> welcome. For a nicer GUI, see [ilyabrilev/biosim4](https://github.com/ilyabrilev/biosim4).
 
-* [Code walkthrough](#CodeWalkthrough)
-* [Main data structures](#MainDataStructures)
-* [Config file](#ConfigFile)
-* [Program output](#ProgramOutput)
-* [Main program loop](#MainProgramLoop)
-* [Sensory inputs and action outputs](#SensoryInputsAndActionOutputs)
-* [Basic value types](#BasicValueTypes)
-* [Pheromones](#Pheromones)
-* [Useful utility functions](#UsefulUtilityFunctions)
-* [Installing the code](#InstallingTheCode)
-* [Building the executable](#BuildingTheExecutable)
-* [System requirements](#SystemRequirements)
-* [Compiling](#Compiling)
-* [Bugs](#Bugs)
-* [Execution](#Execution)
-* [Tools directory](#ToolsDirectory)
-* [Build log](#BuildLog)
+## 🚀 Quick start
 
+The easiest route is Docker, which is also what CI uses.
 
-Code walkthrough<a name="CodeWalkthrough"></a>
---------------------
+```sh
+# 1. Build the toolchain image (once)
+docker build -t biosim4 .
 
-<a name="MainDataStructures"></a>
+# 2. Compile into ./bin
+docker run --rm -ti -v `pwd`:/app --name biosim biosim4 make
+
+# 3. Run with the default config
+docker run --rm -ti -v `pwd`:/app --name biosim biosim4 ./bin/Release/biosim4 biosim4.ini
+```
+
+You should see output like `Gen 1, 2290 survivors`. Movies, logs and plots appear under `images/` and `logs/`.
+
+To get a shell in the container instead (handy for running the tools and tests), replace the last
+command with `... biosim4 bash`. Exit with `Ctrl-D`. Everything written to the mounted directory persists.
+
+**Native build:** see [Building](#-building).
+
+## 🌐 Web app
+
+[`webapp/`](webapp/) is a browser-based reimplementation of the simulator in TypeScript and React. It
+needs no server and no C++ toolchain. You can tune the world and genetics from a control panel, watch every
+creature move live on a canvas, inspect and edit a creature's neural net, and switch neural-net evaluation
+between a CPU and a WebGPU compute backend.
+
+```sh
+cd webapp
+npm install
+npm run dev      # dev server with hot reload
+npm run build    # type-check and build a static dist/
+```
+
+See [`webapp/README.md`](webapp/README.md) for features and the deliberate differences from the C++ version.
+
+## 🧠 How it works
+
+```mermaid
+flowchart LR
+    S[Sensors<br/>position, age, population,<br/>barriers, pheromones...] --> N[Neural net<br/>built from genome]
+    N --> A[Actions<br/>move, emit pheromone,<br/>set oscillator...]
+    A --> W[World step]
+    W -->|end of generation| E{Selection criterion}
+    E -->|survivors reproduce<br/>with mutation| G[New generation]
+    G --> S
+```
+
+Each creature's brain wires sensory input neurons through optional internal neurons to action output
+neurons. The sensors and actions are described in the video above and enumerated in
+[`src/sensors-actions.h`](src/sensors-actions.h).
+
 ### Main data structures
 
-The code in the src directory compiles to a single console program named biosim4. When it is
-invoked, it will read parameters from a config file named biosim4.ini by default. A different
-config file can be specified on the command line.
+| Piece | Files | Role |
+|---|---|---|
+| `Grid` | `grid.h/.cpp` | 2D array of 16-bit indexes. `0` means empty, any other value indexes into `Peeps`. It knows nothing else about the world. |
+| `Peeps` | `peeps.h/.cpp` | The population: a `std::vector` of `Indiv`. |
+| `Indiv` | `indiv.h/.cpp` | One creature: genome, neural-net brain, X,Y location, and personal parameters (responsiveness, oscillator period, age). It converts its genome to a brain, computes its inputs in `Indiv::getSensor()`, and prints its genome and net as text. |
+| `Signals` | `signals.h/.cpp` | A pheromone layer that overlays the grid. |
+| `ParamManager` | `params.h/.cpp` | Reads `biosim4.ini` and watches it for changes. |
 
-The simulator will then configure a 2D arena where the creatures live. Class Grid (see grid.h and grid.cpp)
-contains a 2D array of 16-bit indexes, where each nonzero index refers to a specific individual in class Peeps (see below).
-Zero values in Grid indicate empty locations. Class Grid does not know anything else about the world; it only
-stores indexes to represent who lives where.
-
-The population of creatures is stored in class Peeps (see peeps.h and peeps.cpp). Class Peeps contains
-all the individuals in the simulation, stored as instances of struct Indiv in a std::vector container.
-The indexes in class Grid are indexes into the vector of individuals in class Peeps. Class Peeps keeps a
-container of struct Indiv, but otherwise does not know anything about the internal workings of individuals.
-
-Each individual is represented by an instance of struct Indiv (see indiv.h and indiv.cpp). Struct Indiv
-contains an individual's genome, its corresponding neural net brain, and a redundant copy of the individual's
-X,Y location in the 2D grid. It also contains a few other parameters for the individual, such as its
-"responsiveness" level, oscillator period, age, and other personal parameters. Struct Indiv knows how
-to convert an individual's genome into its neural net brain at the beginning of the simulation.
-It also knows how to print the genome and neural net brain in text format to stdout during a simulation.
-It also has a function Indiv::getSensor() that is called to compute the individual's input neurons for
-each simulator step.
-
-All the simulator code lives in the BS namespace (short for "biosim".)
-
-<a name="ConfigFile"></a>
-### Config file
-
-The config file, named biosim4.ini by default, contains all the tunable parameters for a
-simulation run. The biosim4 executable reads the config file at startup, then monitors it for
-changes during the simulation. Although it's not foolproof, many parameters can be modified during
-the simulation run. Class ParamManager (see params.h and params.cpp) manages the configuration
-parameters and makes them available to the simulator through a read-only pointer provided by
-ParamManager::getParamRef().
-
-See the provided biosim4.ini for documentation for each parameter. Most of the parameters
-in the config file correspond to members in struct Params (see params.h). A few additional
-parameters may be stored in struct Params. See the documentation in params.h for how to
-support new parameters.
-
-
-<a name="ProgramOutput"></a>
-### Program output
-
-Depending on the parameters in the config file, the following data can be produced:
-
-* The simulator will append one line to logs/epoch.txt after the completion of
-each generation. Each line records the generation number, number of individuals
-who survived the selection criterion, an estimate of the population's genetic
-diversity, average genome length, and number of deaths due to the "kill" gene.
-This file can be fed to tools/graphlog.gp to produce a graphic plot.
-
-* The simulator will display a small number of sample genomes at regular
-intervals to stdout. Parameters in the config file specify the number and interval.
-The genomes are displayed in hex format and also in a mnemonic format that can
-be fed to tools/graph-nnet.py to produce a graphic network diagram.
-
-* Movies of selected generations will be created in the images/ directory. Parameters
-in the config file specify the interval at which to make movies. Each movie records
-a single generation.
-
-* At intervals, a summary is printed to stdout showing the total number of neural
-connections throughout the population from each possible sensory input neuron and to each
-possible action output neuron.
-
-<a name="MainProgramLoop"></a>
 ### Main program loop
 
-The simulator starts with a call to simulator() in simulator.cpp. After initializing the
-world, the simulator executes three nested loops: the outer loop for each generation,
-an inner loop for each simulator step within the generation, and an innermost loop for
-each individual in the population. The innermost loop is thread-safe so that it can
-be parallelized by OpenMP.
+`simulator()` in [`simulator.cpp`](src/simulator.cpp) runs three nested loops:
 
-At the end of each simulator step, a call is made to endOfSimStep() in single-thread
-mode (see endOfSimStep.cpp) to create a video frame representing the locations of all
-the individuals at the end of the simulator step. The video frame is pushed on to a
-stack to be converted to a movie later. Also some housekeeping may be done for certain
-selection scenarios.  See the comments in endOfSimStep.cpp for more information.
+1. **Generation:** each generation ends with `endOfGeneration()`, which builds the movie from the saved frames and may update the graph.
+2. **Simulation step:** each step ends with the single-threaded `endOfSimStep()`, which renders a video frame.
+3. **Individual:** the innermost loop is thread-safe and parallelized with OpenMP.
 
-At the end of each generation, a call is made to endOfGeneration() in single-thread
-mode (see endOfGeneration.cpp) to create a video from the saved video frames.
-Also a new graph might be generated showing the progress of the simulation. See
-endOfGeneraton.cpp for more information.
+### Sensors and actions
 
-<a name="SensoryInputsAndActionOutputs"></a>
-### Sensory inputs and action outputs
+Enable or disable neurons by moving enumerants relative to the `NUM_SENSES` and `NUM_ACTIONS` markers in
+[`sensors-actions.h`](src/sensors-actions.h). Anything after a marker is compiled out. If you add
+items, also update the name functions in [`analysis.cpp`](src/analysis.cpp).
 
-See the YouTube video (link above) for a description of the sensory inputs and action
-outputs. Each sensory input and each action output is a neuron in the individual's
-neural net brain.
+<details>
+<summary><b>Sensors</b> (21 active)</summary>
 
-The header file sensors-actions.h contains enum Sensor which enumerates all the possible sensory
-inputs and enum Action which enumerates all the possible action outputs.
-In enum Sensor, all the sensory inputs before the enumerant NUM_SENSES will
-be compiled into the executable, and all action outputs before NUM_ACTIONS
-will be compiled. By rearranging the enumerants in those enums, you can select
-a subset of all possible sensory and action neurons to be compiled into the
-simulator.
+| Sensor | Meaning |
+|---|---|
+| `LOC_X`, `LOC_Y` | Position in the world |
+| `BOUNDARY_DIST`, `_X`, `_Y` | Distance to the nearest edge |
+| `GENETIC_SIM_FWD` | Genetic similarity of the neighbor ahead |
+| `LAST_MOVE_DIR_X`, `_Y` | Direction of the last movement |
+| `LONGPROBE_POP_FWD`, `LONGPROBE_BAR_FWD` | Long look ahead for population or barriers |
+| `POPULATION`, `_FWD`, `_LR` | Population density nearby, along the forward axis, and along the left-right axis |
+| `BARRIER_FWD`, `BARRIER_LR` | Neighborhood barrier distance |
+| `OSC1` | Internal oscillator |
+| `AGE` | Age in steps |
+| `RANDOM` | Uniform random value |
+| `SIGNAL0`, `_FWD`, `_LR` | Pheromone strength nearby, along the forward axis, and along the left-right axis |
 
-<a name="BasicValueTypes"></a>
+</details>
+
+<details>
+<summary><b>Actions</b> (16 active, plus <code>KILL_FORWARD</code> which is disabled by default)</summary>
+
+| Action | Meaning |
+|---|---|
+| `MOVE_X`, `MOVE_Y` | Signed X or Y movement |
+| `MOVE_FORWARD`, `MOVE_REVERSE` | Continue or reverse the last direction |
+| `MOVE_RL`, `MOVE_LEFT`, `MOVE_RIGHT` | Move relative to heading |
+| `MOVE_EAST/WEST/NORTH/SOUTH` | Compass movement |
+| `MOVE_RANDOM` | Random step |
+| `SET_OSCILLATOR_PERIOD` | Tune the internal oscillator |
+| `SET_LONGPROBE_DIST` | Tune the long-probe distance |
+| `SET_RESPONSIVENESS` | Scale how strongly outputs trigger movement |
+| `EMIT_SIGNAL0` | Emit pheromone |
+| `KILL_FORWARD` | Kill the neighbor ahead (off unless moved before `NUM_ACTIONS`) |
+
+</details>
+
 ### Basic value types
 
-There are a few basic value types:
+| Type | Description |
+|---|---|
+| `enum Compass` | Eight-way directions plus `CENTER`: `N, NE, E, SE, S, SW, W, NW, CENTER` |
+| `struct Dir` | Abstract representation of `Compass` values |
+| `struct Coord` | Signed 16-bit X,Y pair: a location or a difference between locations |
+| `struct Polar` | Signed 32-bit magnitude plus a `Dir` |
 
-* enum Compass represents eight-way directions with enumerants N=0, NE, E, SW, S, SW, W, NW, CENTER.
+Conversions and math between these types are in [`basicTypes.h`](src/basicTypes.h) and exercised in
+`unitTestBasicTypes.cpp`.
 
-* struct Dir is an abstract representation of the values of enum Compass.
-
-* struct Coord is a signed 16-bit integer X,Y coordinate pair. It is used to represent a location
-in the 2D world, or can represent the difference between two locations.
-
-* struct Polar holds a signed 32-bit integer magnitude and a direction of type Dir.
-
-Various conversions and math are possible between these basic types. See unitTestBasicTypes.cpp
-for examples. Also see basicTypes.h for more information.
-
-<a name="Pheromones"></a>
 ### Pheromones
 
-A simple system is used to simulate pheromones emitted by the individuals. Pheromones
-are called "signals" in simulator-speak (see signals.h and signals.cpp). Struct Signals
-holds a single layer that overlays the 2D world in class Grid. Each location can contain
-a level of pheromone (there's only a single kind of pheromone supported at present). The
-pheromone level at any grid location is stored as an unsigned 8-bit integer, where zero means no
-pheromone, and 255 is the maximum. Each time an individual emits a pheromone, it increases
-the pheromone values in a small neighborhood around the individual up to the maximum
-value of 255. Pheromone levels decay over time if they are not replenished
-by the individuals in the area.
+Pheromones are called *signals* in the code. `Signals` holds one layer over the grid (there is currently a
+single pheromone kind). Each cell stores a `uint8_t`, where `0` is none and `255` is the maximum. An
+individual that emits a pheromone raises the values in a small neighborhood around itself to `255`. Levels
+decay over time unless replenished.
 
-<a name="UsefulUtilityFunctions"></a>
-### Useful utility functions
+### Utility: `visitNeighborhood()`
 
-The utility function visitNeighborhood() in grid.cpp can be used to execute a
-user-defined lambda or function over each location
-within a circular neighborhood defined by a center point and floating point radius. The function
-calls the user-defined function once for each location, passing it a Coord value. Only locations
-within the bounds of the grid are visited. The center location is included among the visited
-locations. For example, a radius of 1.0 includes only the center location plus four neighboring locations.
-A radius of 1.5 includes the center plus all the eight-way neighbors. The radius can be arbitrarily large
-but large radii require lots of CPU cycles.
+`visitNeighborhood()` in [`grid.cpp`](src/grid.cpp) runs a lambda over every in-bounds grid cell within a
+circular neighborhood (center point plus floating-point radius). The center is included. A radius of `1.0`
+visits the center and its 4 neighbors, and `1.5` visits the center and all 8 neighbors. Large radii cost a lot of CPU.
 
+## 🔨 Building
 
+### Requirements
 
-<a name="InstallingTheCode"></a>
-## Installing the code
---------------------
+Upstream tested the code on:
 
-Copy the directory structure to a location of your choice.
+- Ubuntu 21.04 / 22.04 or Debian 10, with gcc 8.3 to 10.3
+- `cimg-dev` ≥ 2.4.5 and `libopencv-dev` ≥ 3.2 (movies)
+- `python3-igraph` (only for `tools/graph-nnet.py`)
+- `gnuplot` (only for `tools/graphlog.gp`)
 
-<a name="BuildingTheExecutable"></a>
-## Building the executable
---------------------
+The [Dockerfile](Dockerfile) installs all of these on `ubuntu:latest`, and its `darwin` user avoids root-owned build output.
 
-<a name="SystemRequirements"></a>
-### System requirements
+### Pick a build system
 
-This code is known to run in the following environment:
-
-* Ubuntu 21.04, 22.04, or Debian 10 (Buster)
-* cimg-dev 2.4.5 or later
-* libopencv-dev 3.2 or later
-* gcc 8.3, 9.3 or 10.3
-* python-igraph 0.8.3 (used only by tools/graph-nnet.py)
-* gnuplot 5.2.8 (used only by tools/graphlog.gp)
-
-The code also runs in distributions based on Ubuntu 20.04, but only if the default version of
-cimg-dev is replaced with version 2.8.4 or later.
-
-<a name="Compiling"></a>
-### Compiling
-
-You have several options:
-
-#### Code::Blocks project file
-
-The file named "biosim4.cbp" is a configuration file for the Code::Blocks IDE version 20.03.
-
-#### Makefile
-
-A Makefile is provided which was created from biosim4.cbp with cbp2make. Possible make commands include:
-
-* "make" with no arguments makes release and debug versions in ./bin/Release and ./bin/Debug
-* "make release" makes a release version in ./bin/Release
-* "make debug" makes a debug version in ./bin/Debug
-* "make clean" removes the intermediate build files
-
-#### Docker
-
-A Dockerfile is provided which leverages the aforementioned Makefile.
-
-To build a Docker environment in which you can compile the program:
+<table>
+<tr><th>Makefile</th><th>CMake</th><th>Code::Blocks</th></tr>
+<tr valign="top">
+<td>
 
 ```sh
-docker build -t biosim4 .
+make            # debug + release
+make release    # ./bin/Release
+make debug      # ./bin/Debug
+make clean
+make distclean  # also logs/* images/*
 ```
 
-You can then compile the program with an ephemeral container. Note that `pwd` stands for the fullpath of your `biosim4` project, something like `C:/full-path-in-windows/to-your/biosim4-folder/biosim4` in Windows, or `/home/user/project-path/biosim4/` in Linux/MacOS:
+C++17, `-fopenmp`, OpenCV via `pkg-config opencv4`.
+
+</td>
+<td>
 
 ```sh
-docker run --rm -ti -v `pwd`:/app --name biosim biosim4 make
-```
-When you exit the container, the files compiled in your container files will persist in `./bin`.
-
-#### CMake
-
-A `CMakeList.txt` file is provided to allow development, build, test, installation and packaging with the CMake tool chain and all IDEs that support CMake. 
-
-To build with cmake you need to install cmake. 
-
-If you're using docker, `cmake` is already installed in the image. You can directly open its terminal to use it:
-```sh
-docker run --rm -ti -v `pwd`:/app --name biosim biosim4 bash
-```
-
-Once cmake is installed, use the procedure below:
-```sh
-mkdir build
-cd build
+mkdir build && cd build
 cmake ../
 cmake --build ./
-```
 
-To make a test installation and run the program:
-
-```sh
-mkdir build
-cd build
-cmake ../
-cmake --build ./
+# test install
 mkdir test_install
 cmake --install ./ --prefix ./test_install
-cd test_install
-./bin/biosim4
-```
+cd test_install && ./bin/biosim4
 
-To make a release package:
-
-```sh
-mkdir build
-cd build
-cmake ../
-cmake --build ./
+# package
 cpack ./
 ```
 
-<a name="Bugs"></a>
-## Bugs
---------------------
+</td>
+<td>
 
-If you try to compile the simulator under a distribution based on Ubuntu 20.04, you will encounter this
-bug in the version of CImg.h (package cimg-dev) provided by the package maintainer:
+Open `biosim4.cbp` (Code::Blocks 20.03).
 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=951965
+</td>
+</tr>
+</table>
 
-In biosim4, CImg.h is used only as a convenient interface to OpenCV
-to generate movies of the simulated creatures in their 2D world. You have several
-choices if you want to proceed with Ubuntu 20.04:
+The installed CMake layout includes `biosim4.ini`, `tools/`, and empty `logs/` and `images/` directories.
 
-* You can strip out the code that generates the movies and just run the simulator without the movies. Most of
-that graphics code is in imageWriter.cpp and imageWriter.h.
+### Ubuntu 20.04 and CImg
 
-* You can upgrade your CImg.h to version 2.8.4 or later by installing the [Ubuntu 22.04 cimg-dev package](https://packages.ubuntu.com/jammy/cimg-dev), For example:
-```
-cd /tmp && \
-wget http://mirrors.kernel.org/ubuntu/pool/universe/c/cimg/cimg-dev_2.9.4+dfsg-3_all.deb -O cimg-dev_2.9.4+dfsg-3_all.deb && \
-sudo apt install ./cimg-dev_2.9.4+dfsg-3_all.deb && \
-rm cimg-dev_2.9.4+dfsg-3_all.deb;
-```
+The `cimg-dev` package on Ubuntu 20.04 has a [known bug](https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=951965).
+CImg is used only as an interface to OpenCV for writing movies. Options:
 
-* You could convert the CImg.h function calls to use OpenCV directly. Sorry I don't have a guide for how
-to do that.
+- Strip the movie code (mostly `imageWriter.cpp` and `imageWriter.h`) and run without movies.
+- Install the Ubuntu 22.04 `cimg-dev` (≥ 2.8.4):
+  ```sh
+  cd /tmp && \
+  wget http://mirrors.kernel.org/ubuntu/pool/universe/c/cimg/cimg-dev_2.9.4+dfsg-3_all.deb && \
+  sudo apt install ./cimg-dev_2.9.4+dfsg-3_all.deb && \
+  rm cimg-dev_2.9.4+dfsg-3_all.deb
+  ```
+- Port the CImg calls to OpenCV directly.
 
-<a name="Execution"></a>
-## Execution
---------------------
+## ▶️ Running
 
-Test everything is working by executing the Debug or Release executable in the bin directory with the default config file ("biosim4.ini"). e.g.:
-```
-./bin/Release/biosim4 biosim4.ini
-```
-
-You should have output something like:
-`Gen 1, 2290 survivors`
-
-If this works then edit the config file ("biosim4.ini") for the parameters you want for the simulation run and execute the Debug or Release executable. Optionally specify the name of the config file as the first command line argument, e.g.:
-
-```
+```sh
 ./bin/Release/biosim4 [biosim4.ini]
 ```
 
-Note: If using docker,
-```sh
-docker run --rm -ti -v `pwd`:/app --name biosim biosim4 bash
-```
-will put you into
-an environment where you can run the above and have all your files persist when you exit (using `Ctrl-D`).
+The config path is optional and defaults to `biosim4.ini`. If the file is missing, hardcoded defaults
+matching the shipped `biosim4.ini` are used.
 
+## ⚙️ Configuration
 
-<a name="ToolsDirectory"></a>
-## Tools directory
---------------------
+[`biosim4.ini`](biosim4.ini) holds every tunable parameter and documents each one inline. The simulator
+re-reads it while running, so many parameters can be changed mid-run. Parameters map to `struct Params` in
+[`params.h`](src/params.h), which also explains how to add new ones.
 
-tools/graphlog.gp takes the generated log file logs/epoch-log.txt
-and generates a graphic plot of the simulation run in images/log.png. You may need to adjust
-the directory paths in graphlog.gp for your environment. graphlog.gp can be invoked manually,
-or if the option "updateGraphLog" is set to true
-in the simulation config file, the simulator will try to invoke tools/graphlog.gp automatically
-during the simulation run. Also see the parameter named updateGraphLogStride in the config file.
+Some knobs worth knowing:
 
-tools/graph-nnet.py takes a text file (hardcoded name "net.txt") and generates a neural net
-connection diagram using igraph. The file net.txt contains an encoded form of one genome, and
-must be the same format as the files
-generated by displaySampleGenomes() in src/analysis.cpp which is called by simulator() in
-src/simulator.cpp. The genome output is printed to stdout automatically
-if the parameter named "displaySampleGenomes" is set to nonzero in the config file.
-An individual genome can be copied from that output stream and renamed "net.txt" in order to run
-graph-nnet.py.
+| Parameter | Default | What it does |
+|---|---|---|
+| `population` | `3000` | Number of creatures |
+| `sizeX` / `sizeY` | `128` | World dimensions |
+| `stepsPerGeneration` | `300` | Steps per generation |
+| `maxGenerations` | `200000` | When to stop |
+| `numThreads` | `4` | OpenMP threads |
+| `challenge` | `6` | Selection criterion (see below) |
+| `barrierType` | `0` | Obstacle layout (see below) |
+| `deterministic` | `false` | Seeded RNG for reproducible runs |
+| `saveVideo` / `videoStride` | `true` / `25` | Make a movie every N generations |
 
+Parameters can also be scheduled by generation, e.g. `barrierType@500 = 5`.
 
-Note: If using the `docker run ... bash` command, the presumed directory structure would necessitate the
-following syntax:
+<details>
+<summary><b>Selection challenges</b> (<code>challenge</code>, see <code>survival-criteria.cpp</code>)</summary>
+
+| # | Criterion | # | Criterion |
+|---|---|---|---|
+| 0 | circle | 10 | radioactive walls |
+| 1 | right half | 11 | against any wall |
+| 2 | right quarter | 12 | touch any wall any time |
+| 3 | neighbor count | 13 | east-west eighths |
+| 4 | center weighted | 14 | near barrier |
+| 40 | center unweighted | 15 | pairs |
+| 5 | corner 1/4 radius | 16 | contact location sequence |
+| 6 | corner 1/4 radius weighted | 17 | altruism, circle + NE corner |
+| 7 | migrate distance | 8 | center sparse |
+| 9 | left eighth | | |
+
+</details>
+
+<details>
+<summary><b>Barrier types</b> (<code>barrierType</code>, see <code>createBarrier.cpp</code>)</summary>
+
+`0` none · `1` vertical bar, constant location · `2` vertical bar, random locations · `3` five staggered vertical bars · `4` horizontal bar, north center · `5` floating islands · `6` sequence of spots
+
+</details>
+
+## 📈 Output
+
+Depending on the config, a run produces:
+
+| Output | Where | Notes |
+|---|---|---|
+| Epoch log | `logs/epoch-log.txt` | One line per generation: generation, survivors, genetic diversity estimate, average genome length, deaths from the "kill" gene. |
+| Sample genomes | stdout | Hex plus a mnemonic format that `tools/graph-nnet.py` can draw. Count and interval are set in the config. |
+| Movies | `images/` | One movie per selected generation, at the configured interval. |
+| Connection summary | stdout | Totals of neural connections from each sensor and to each action across the population. |
+
+## 🛠️ Tools
+
+| Tool | Purpose |
+|---|---|
+| [`tools/graphlog.gp`](tools/graphlog.gp) | gnuplot script that turns `logs/epoch-log.txt` into `images/log.png`. The simulator runs it automatically when `updateGraphLog = true` (see `updateGraphLogStride`). |
+| [`tools/graphlog-genomeLength.gp`](tools/graphlog-genomeLength.gp) | Variant that also plots genome length. Edit the hardcoded log path first. |
+| [`tools/graph-nnet.py`](tools/graph-nnet.py) | Draws a neural-net diagram with igraph from a genome saved as `net.txt` (written to `net.svg`). |
 
 ```sh
 gnuplot tools/graphlog.gp
 cd tools && python3 graph-nnet.py
 ```
 
-<a name="BuildLog"></a>
-## Build log
---------------------
+To use `graph-nnet.py`, copy one genome from the `displaySampleGenomes` stdout output into `tools/net.txt`.
+Adjust paths in the `.gp` scripts if they don't match your environment.
 
-In case it helps for debugging the build process, here is a build log from Code::Blocks running under Ubuntu 21.04:
+## ✅ Tests
 
+[`tests/testapp.py`](tests/testapp.py) runs a full simulation and checks the outcome against expected
+ranges stored in [`tests/configs/testapp.ini`](tests/configs/testapp.ini). It runs `./bin/Release/biosim4`,
+so do a release build first, and always run it from inside `tests/`.
 
-```
--------------- Clean: Release in biosim4 (compiler: GNU GCC Compiler)---------------
-
-Cleaned "biosim4 - Release"
-
--------------- Build: Release in biosim4 (compiler: GNU GCC Compiler)---------------
-
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/analysis.cpp -o obj/Release/src/analysis.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/basicTypes.cpp -o obj/Release/src/basicTypes.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/createBarrier.cpp -o obj/Release/src/createBarrier.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/endOfGeneration.cpp -o obj/Release/src/endOfGeneration.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/endOfSimStep.cpp -o obj/Release/src/endOfSimStep.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/executeActions.cpp -o obj/Release/src/executeActions.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/feedForward.cpp -o obj/Release/src/feedForward.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/genome-compare.cpp -o obj/Release/src/genome-compare.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/genome.cpp -o obj/Release/src/genome.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/getSensor.cpp -o obj/Release/src/getSensor.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/grid.cpp -o obj/Release/src/grid.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/imageWriter.cpp -o obj/Release/src/imageWriter.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/indiv.cpp -o obj/Release/src/indiv.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/main.cpp -o obj/Release/src/main.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/params.cpp -o obj/Release/src/params.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/peeps.cpp -o obj/Release/src/peeps.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/random.cpp -o obj/Release/src/random.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/signals.cpp -o obj/Release/src/signals.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/simulator.cpp -o obj/Release/src/simulator.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/spawnNewGeneration.cpp -o obj/Release/src/spawnNewGeneration.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/survival-criteria.cpp -o obj/Release/src/survival-criteria.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/unitTestBasicTypes.cpp -o obj/Release/src/unitTestBasicTypes.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/unitTestConnectNeuralNetWiringFromGenome.cpp -o obj/Release/src/unitTestConnectNeuralNetWiringFromGenome.o
-g++ -Wall -fexceptions -fopenmp -O3 -I/usr/include/opencv4 -c /home/dm/sw/biosim4-git/src/unitTestGridVisitNeighborhood.cpp -o obj/Release/src/unitTestGridVisitNeighborhood.o
-g++  -o bin/Release/biosim4 obj/Release/src/analysis.o obj/Release/src/basicTypes.o obj/Release/src/createBarrier.o obj/Release/src/endOfGeneration.o obj/Release/src/endOfSimStep.o obj/Release/src/executeActions.o obj/Release/src/feedForward.o obj/Release/src/genome-compare.o obj/Release/src/genome.o obj/Release/src/getSensor.o obj/Release/src/grid.o obj/Release/src/imageWriter.o obj/Release/src/indiv.o obj/Release/src/main.o obj/Release/src/params.o obj/Release/src/peeps.o obj/Release/src/random.o obj/Release/src/signals.o obj/Release/src/simulator.o obj/Release/src/spawnNewGeneration.o obj/Release/src/survival-criteria.o obj/Release/src/unitTestBasicTypes.o obj/Release/src/unitTestConnectNeuralNetWiringFromGenome.o obj/Release/src/unitTestGridVisitNeighborhood.o  -lX11 -lgomp -pthread -O3 -s  /usr/lib/x86_64-linux-gnu/libopencv_core.so /usr/lib/x86_64-linux-gnu/libopencv_video.so /usr/lib/x86_64-linux-gnu/libopencv_videoio.so
-Output file is bin/Release/biosim4 with size 778.42 KB
-Process terminated with status 0 (0 minute(s), 11 second(s))
-0 error(s), 0 warning(s) (0 minute(s), 11 second(s))
+```sh
+cd tests
+python3 testapp.py --show              # list configured tests
+python3 testapp.py --test microtest    # quick sample run
+python3 testapp.py --help
 ```
 
+See [`tests/README.md`](tests/README.md) for adding tests. There are also compiled-in unit tests
+(`src/unitTest*.cpp`) for basic types, neural wiring from genome, and neighborhood visiting.
 
+## 🗂️ Repository layout
+
+```
+.
+├── src/            simulator source (builds to the `biosim4` executable)
+├── webapp/         browser version (TypeScript + React, Vite)
+├── tools/          gnuplot and igraph helpers
+├── tests/          testapp.py harness and test configs
+├── biosim4.ini     default configuration
+├── Makefile        debug and release builds
+├── CMakeLists.txt  CMake build, install and CPack
+├── biosim4.cbp     Code::Blocks project
+├── Dockerfile      build/run environment
+├── bin/            build output (Debug/, Release/)
+├── logs/ images/   run output
+└── .github/        CI: build and compile inside Docker
+```
+
+## 📄 License
+
+[MIT](LICENSE). Copyright © 2021–2022 David R. Miller and other contributors.
